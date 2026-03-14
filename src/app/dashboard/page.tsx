@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { MapPin, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
-import { mockTrendData, mockAlerts, mockActionQueue, mockWardHeatData, mockCategoryDistribution, PRIORITY_COLORS, STATUS_CONFIG } from '@/lib/mockData';
+import { mockTrendData, mockAlerts, mockActionQueue, mockWardHeatData, mockCategoryDistribution, STATUS_CONFIG } from '@/lib/mockData';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://varunka-janshakti-backend.hf.space';
 
