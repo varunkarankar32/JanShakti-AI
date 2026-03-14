@@ -15,6 +15,9 @@ interface LiveComplaint {
   status: string;
   input_mode: string;
   assigned_to: string | null;
+  assigned_authority?: string | null;
+  authority_response?: string | null;
+  citizen_update?: string | null;
   created_at: string | null;
   rating: number | null;
 }
@@ -61,6 +64,12 @@ export default function DashboardPage() {
   const [authError, setAuthError] = useState('');
   const [leaderEmail, setLeaderEmail] = useState('');
   const [leaderPassword, setLeaderPassword] = useState('');
+  const [selectedTicket, setSelectedTicket] = useState<string>('');
+  const [authorityName, setAuthorityName] = useState('');
+  const [authorityResponse, setAuthorityResponse] = useState('');
+  const [leaderNote, setLeaderNote] = useState('');
+  const [actionMessage, setActionMessage] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
 
   const handleLeaderLogout = useCallback(() => {
     setLeaderToken('');
@@ -206,6 +215,47 @@ export default function DashboardPage() {
       setAuthLoading(false);
     }
   };
+
+  const parseDetail = async (res: Response) => {
+    try {
+      const payload = await res.json();
+      return payload?.detail || 'Request failed';
+    } catch {
+      return 'Request failed';
+    }
+  };
+
+  const runLeaderAction = async (endpoint: string, body: Record<string, unknown>, successMessage: string) => {
+    if (!leaderToken) return;
+    setActionLoading(true);
+    setActionMessage('');
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${leaderToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const detail = await parseDetail(res);
+        setActionMessage(`✕ ${detail}`);
+        return;
+      }
+
+      setActionMessage(successMessage);
+      await fetchData();
+    } catch {
+      setActionMessage('✕ Unable to update workflow right now.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const selectedComplaint = complaints.find((c) => c.ticket_id === selectedTicket) || null;
 
   const kpis = stats ? [
     { label: 'Issues Tracked', value: String(stats.total_complaints), icon: '📋', color: '#3b82f6', change: `${stats.complaints_today} today` },
@@ -544,7 +594,7 @@ export default function DashboardPage() {
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                        {['Ticket', 'Title', 'Category', 'Ward', 'Priority', 'AI Score', 'Status', 'Input', 'Filed'].map(h => (
+                        {['Ticket', 'Title', 'Category', 'Ward', 'Priority', 'AI Score', 'Status', 'Input', 'Filed', 'Actions'].map(h => (
                           <th key={h} style={{ textAlign: 'left', padding: '10px 12px', fontSize: '0.75rem', color: 'var(--text-tertiary)', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{h}</th>
                         ))}
                       </tr>
@@ -570,11 +620,130 @@ export default function DashboardPage() {
                             <td style={{ padding: '12px', fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
                               {c.created_at ? new Date(c.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}
                             </td>
+                            <td style={{ padding: '12px' }}>
+                              <button
+                                className="btn btn-secondary"
+                                style={{ padding: '6px 10px', fontSize: '0.72rem' }}
+                                onClick={() => {
+                                  setSelectedTicket(c.ticket_id);
+                                  setAuthorityName(c.assigned_authority || '');
+                                  setLeaderNote('');
+                                  setAuthorityResponse(c.authority_response || '');
+                                  setActionMessage('');
+                                }}
+                              >
+                                Manage
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {selectedComplaint && (
+                <div style={{ marginTop: 20, padding: 18, borderRadius: 10, border: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>Workflow Control</div>
+                      <div style={{ fontWeight: 700, color: 'var(--accent-blue-light)' }}>{selectedComplaint.ticket_id}</div>
+                    </div>
+                    <span className={`badge badge-${selectedComplaint.priority?.toLowerCase()}`}>{selectedComplaint.priority}</span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <input
+                      className="form-input"
+                      value={authorityName}
+                      onChange={(e) => setAuthorityName(e.target.value)}
+                      placeholder="Authority (e.g., Water Dept.)"
+                    />
+                    <input
+                      className="form-input"
+                      value={leaderNote}
+                      onChange={(e) => setLeaderNote(e.target.value)}
+                      placeholder="Leader note"
+                    />
+                  </div>
+
+                  <textarea
+                    className="form-textarea"
+                    value={authorityResponse}
+                    onChange={(e) => setAuthorityResponse(e.target.value)}
+                    placeholder="Authority response / field update"
+                    style={{ marginBottom: 10 }}
+                  />
+
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    <button
+                      className="btn btn-primary"
+                      disabled={actionLoading}
+                      onClick={() => runLeaderAction(
+                        `/api/complaints/${selectedComplaint.ticket_id}/leader/assign`,
+                        {
+                          authority_name: authorityName || 'Concerned Authority',
+                          assigned_team: selectedComplaint.assigned_to || null,
+                          leader_note: leaderNote || null,
+                        },
+                        '✓ Assigned to authority'
+                      )}
+                    >Assign</button>
+
+                    <button
+                      className="btn btn-secondary"
+                      disabled={actionLoading}
+                      onClick={() => runLeaderAction(
+                        `/api/complaints/${selectedComplaint.ticket_id}/leader/status`,
+                        { status: 'in_progress', leader_note: leaderNote || null },
+                        '✓ Marked in progress'
+                      )}
+                    >In Progress</button>
+
+                    <button
+                      className="btn btn-secondary"
+                      disabled={actionLoading}
+                      onClick={() => runLeaderAction(
+                        `/api/complaints/${selectedComplaint.ticket_id}/authority/respond`,
+                        {
+                          authority_name: authorityName || 'Concerned Authority',
+                          response: authorityResponse || 'Field team submitted update.',
+                          mark_verification_ready: true,
+                        },
+                        '✓ Authority response recorded'
+                      )}
+                    >Authority Response</button>
+
+                    <button
+                      className="btn btn-secondary"
+                      disabled={actionLoading}
+                      onClick={() => runLeaderAction(
+                        `/api/complaints/${selectedComplaint.ticket_id}/leader/status`,
+                        { status: 'verification', leader_note: leaderNote || null },
+                        '✓ Moved to verification'
+                      )}
+                    >Verification</button>
+
+                    <button
+                      className="btn btn-primary"
+                      disabled={actionLoading}
+                      onClick={() => runLeaderAction(
+                        `/api/complaints/${selectedComplaint.ticket_id}/leader/resolve`,
+                        {
+                          resolution_note: leaderNote || authorityResponse || 'Resolved and verified by leader.',
+                          citizen_update: `Leader verified completion for ${selectedComplaint.ticket_id}. Issue marked solved.`,
+                        },
+                        '✓ Marked as solved and notified'
+                      )}
+                    >Mark Solved</button>
+                  </div>
+
+                  {(selectedComplaint.citizen_update || actionMessage) && (
+                    <div style={{ marginTop: 10, fontSize: '0.8rem', color: actionMessage.startsWith('✕') ? '#b91c1c' : 'var(--text-secondary)' }}>
+                      {actionMessage || selectedComplaint.citizen_update}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

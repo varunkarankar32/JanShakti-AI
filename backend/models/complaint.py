@@ -39,6 +39,7 @@ class Complaint(Base):
     longitude = Column(Float, nullable=True)
 
     # Citizen Info
+    citizen_user_id = Column(Integer, nullable=True, index=True)
     citizen_name = Column(String, nullable=True)
     citizen_phone = Column(String, nullable=True)
 
@@ -56,6 +57,10 @@ class Complaint(Base):
     status = Column(SqlEnum(ComplaintStatus), default=ComplaintStatus.OPEN)
     input_mode = Column(SqlEnum(InputMode), default=InputMode.TEXT)
     assigned_to = Column(String, nullable=True)
+    assigned_authority = Column(String, nullable=True)
+    leader_note = Column(Text, nullable=True)
+    authority_response = Column(Text, nullable=True)
+    citizen_update = Column(Text, nullable=True)
 
     # Media
     image_path = Column(String, nullable=True)
@@ -89,6 +94,19 @@ class SocialPost(Base):
     engagement = Column(Integer, default=0)
     is_misinfo = Column(String, default="false")
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ComplaintActivity(Base):
+    __tablename__ = "complaint_activities"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    complaint_id = Column(Integer, index=True, nullable=False)
+    ticket_id = Column(String, index=True, nullable=False)
+    actor_role = Column(String, nullable=False)  # citizen, authority, leader, system
+    actor_name = Column(String, nullable=True)
+    action = Column(String, nullable=False)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class WardStats(Base):

@@ -31,9 +31,42 @@ interface TrackedComplaint {
   ward: string;
   ai_score: number;
   status: string;
+  assigned_authority?: string;
+  authority_response?: string;
+  citizen_update?: string;
+  activity?: { actor_role: string; actor_name?: string; action: string; note?: string; created_at?: string }[];
+}
+
+interface MyComplaint {
+  ticket_id: string;
+  title: string;
+  category: string;
+  ward: string;
+  priority: string;
+  status: string;
+  assigned_authority?: string;
+  authority_response?: string;
+  citizen_update?: string;
+  resolved_at?: string;
+  created_at?: string;
+}
+
+function isTokenExpired(token: string): boolean {
+  try {
+    const base64Url = token.split('.')[1];
+    // JWT uses base64url (- and _ instead of + and /), atob needs standard base64
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded));
+    return typeof payload.exp === 'number' && payload.exp * 1000 < Date.now();
+  } catch {
+    return false; // If we can't decode, let the server decide
+  }
 }
 
 export default function CitizenPortal() {
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+
   const [tab, setTab] = useState<'file' | 'track'>('file');
   const [contactPhone, setContactPhone] = useState('');
   const [category, setCategory] = useState('');
@@ -49,6 +82,7 @@ export default function CitizenPortal() {
   const [complaints, setComplaints] = useState<SubmittedComplaint[]>([]);
   const [trackingId, setTrackingId] = useState('');
   const [trackedResult, setTrackedResult] = useState<TrackedComplaint | null>(null);
+  const [myComplaints, setMyComplaints] = useState<MyComplaint[]>([]);
   const [trackError, setTrackError] = useState('');
   const [backendOnline, setBackendOnline] = useState(false);
 
@@ -66,37 +100,65 @@ export default function CitizenPortal() {
     const token = localStorage.getItem('citizen_token') || '';
     const userRaw = localStorage.getItem('citizen_user');
     if (token && userRaw) {
-      try {
-        const parsedUser = JSON.parse(userRaw) as AuthUser;
-        setAuthToken(token);
-        setAuthUser(parsedUser);
-        setContactPhone(parsedUser.phone || '');
-      } catch {
+      if (!isTokenExpired(token)) {
+        try {
+          const parsedUser = JSON.parse(userRaw) as AuthUser;
+          setAuthToken(token);
+          setAuthUser(parsedUser);
+          setContactPhone(parsedUser.phone || '');
+        } catch {
+          localStorage.removeItem('citizen_token');
+          localStorage.removeItem('citizen_user');
+        }
+      } else {
+        // Token expired — clear storage and show login form
         localStorage.removeItem('citizen_token');
         localStorage.removeItem('citizen_user');
+        setAuthMode('login');
       }
     }
-  }, []);
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!authToken) return;
 
     fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${authToken}` },
+      headers: { Authorization: `Bearer ${authToken}`, 'Cache-Control': 'no-cache' },
     })
       .then(async (res) => {
-        if (!res.ok) {
-          handleLogout();
-          return;
-        }
+        if (!res.ok) return; // Keep user in — any issues handled at submit time
         const user = await res.json();
         setAuthUser(user);
         setContactPhone(user?.phone || '');
       })
       .catch(() => {
-        handleLogout();
+        // Network error (backend temporarily down) — do NOT log out
       });
-  }, [authToken]);
+  }, [authToken]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!authToken) {
+      setMyComplaints([]);
+      return;
+    }
+
+    fetch(`${API_BASE}/api/complaints/my`, {
+      headers: { Authorization: `Bearer ${authToken}`, 'Cache-Control': 'no-cache' },
+    })
+      .then(async (res) => {
+        if (res.status === 401) {
+          handleLogout();
+          setAuthError('Your session expired. Please log in again to continue.');
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json();
+        setMyComplaints(data?.complaints || []);
+      })
+      .catch(() => {
+        // Keep existing UI state on temporary network failures.
+      });
+  }, [authToken, submitted]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Check backend health + load complaints
   useEffect(() => {
@@ -133,6 +195,9 @@ export default function CitizenPortal() {
   const handleLogout = () => {
     setAuthToken('');
     setAuthUser(null);
+    setMyComplaints([]);
+    setTrackedResult(null);
+    setAuthMode('login');
     localStorage.removeItem('citizen_token');
     localStorage.removeItem('citizen_user');
   };
@@ -185,8 +250,20 @@ export default function CitizenPortal() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!authToken || !authUser) {
-      alert('Please sign up or login before filing a complaint.');
+    // Read token fresh from localStorage to avoid React stale closure issues
+    const currentToken = authToken || localStorage.getItem('citizen_token') || '';
+    const currentUser = authUser;
+
+    if (!currentToken || !currentUser) {
+      setAuthMode('login');
+      setAuthError('Please log in before filing a complaint.');
+      return;
+    }
+
+    // Catch expired tokens client-side before wasting the network call
+    if (isTokenExpired(currentToken)) {
+      handleLogout();
+      setAuthError('Your session expired. Please log in again to continue.');
       return;
     }
 
@@ -250,19 +327,19 @@ export default function CitizenPortal() {
         return;
       }
 
-      const res = await fetch('/api/complaints/', {
+      const res = await fetch(`${API_BASE}/api/complaints/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
+          Authorization: `Bearer ${currentToken}`,
         },
         body: JSON.stringify({
           title: finalDescription.slice(0, 80),
           description: finalDescription,
           category: finalCategory,
           ward,
-          citizen_name: authUser.name,
-          citizen_phone: contactPhone || authUser.phone || null,
+          citizen_name: currentUser.name,
+          citizen_phone: contactPhone || currentUser.phone || null,
           input_mode: inputMode,
         }),
       });
@@ -281,7 +358,7 @@ export default function CitizenPortal() {
         const detail = await parseErrorMessage(res);
         if (res.status === 401) {
           handleLogout();
-          alert('Session expired. Please login again.');
+          setAuthError('Your session expired. Please log in again to continue.');
         } else {
           alert(`Failed to submit complaint: ${detail}`);
         }
@@ -686,9 +763,91 @@ export default function CitizenPortal() {
                         );
                       })}
                     </div>
+
+                    {(trackedResult.citizen_update || trackedResult.authority_response) && (
+                      <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+                        {trackedResult.citizen_update && (
+                          <div style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 8, padding: 12 }}>
+                            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-blue-light)', marginBottom: 4 }}>PROFILE UPDATE</div>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{trackedResult.citizen_update}</div>
+                          </div>
+                        )}
+
+                        {trackedResult.authority_response && (
+                          <div style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 8, padding: 12 }}>
+                            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#16a34a', marginBottom: 4 }}>AUTHORITY RESPONSE</div>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{trackedResult.authority_response}</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {trackedResult.activity && trackedResult.activity.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: 1, marginBottom: 8 }}>WORKFLOW TIMELINE</div>
+                        {trackedResult.activity.slice(-5).reverse().map((a, idx) => (
+                          <div key={`${a.action}-${idx}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                            <div>
+                              <div style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                                {a.action.replaceAll('_', ' ')}
+                              </div>
+                              {a.note && <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{a.note}</div>}
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', textTransform: 'capitalize' }}>{a.actor_role}</div>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>{a.created_at ? new Date(a.created_at).toLocaleString('en-IN') : ''}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
+
+              {authUser && (
+                <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 14 }}>
+                    👤 My Profile Updates
+                  </h3>
+
+                  {myComplaints.length === 0 ? (
+                    <div style={{ color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>
+                      No complaints in your profile yet. File a complaint to start tracking updates.
+                    </div>
+                  ) : (
+                    myComplaints.slice(0, 8).map((c) => {
+                      const sConfig = STATUS_CONFIG[c.status as keyof typeof STATUS_CONFIG];
+                      const solved = c.status === 'resolved';
+                      return (
+                        <div key={c.ticket_id} style={{ padding: '12px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontSize: '0.78rem', color: 'var(--accent-blue-light)', fontWeight: 600 }}>{c.ticket_id}</div>
+                              <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>{c.title}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>{c.category} · {c.ward}</div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '0.78rem', color: solved ? '#16a34a' : (sConfig?.color || '#64748b'), fontWeight: 700 }}>
+                                {solved ? 'Solved ✓' : (sConfig?.label || c.status)}
+                              </div>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>
+                                {c.resolved_at ? `Resolved ${new Date(c.resolved_at).toLocaleDateString('en-IN')}` : (c.created_at ? `Filed ${new Date(c.created_at).toLocaleDateString('en-IN')}` : '')}
+                              </div>
+                            </div>
+                          </div>
+
+                          {(c.citizen_update || c.assigned_authority) && (
+                            <div style={{ marginTop: 8, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                              {c.citizen_update || `Assigned to ${c.assigned_authority}`}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
 
               {/* Recent Complaints from Backend */}
               <div className="glass-card" style={{ padding: 24 }}>

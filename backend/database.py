@@ -28,6 +28,27 @@ def _ensure_user_role_column():
             conn.commit()
 
 
+def _ensure_complaint_workflow_columns():
+    # Lightweight migration for existing SQLite DBs before workflow fields.
+    required_columns = {
+        "citizen_user_id": "INTEGER",
+        "assigned_authority": "VARCHAR",
+        "leader_note": "TEXT",
+        "authority_response": "TEXT",
+        "citizen_update": "TEXT",
+    }
+
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(complaints)"))
+        columns = [row[1] for row in result.fetchall()]
+
+        for name, col_type in required_columns.items():
+            if name not in columns:
+                conn.execute(text(f"ALTER TABLE complaints ADD COLUMN {name} {col_type}"))
+
+        conn.commit()
+
+
 def _seed_default_leader():
     from models.user import User
     from routers.auth import hash_password
@@ -58,4 +79,5 @@ def _seed_default_leader():
 def init_db():
     Base.metadata.create_all(bind=engine)
     _ensure_user_role_column()
+    _ensure_complaint_workflow_columns()
     _seed_default_leader()
