@@ -65,7 +65,7 @@ function isTokenExpired(token: string): boolean {
 }
 
 export default function CitizenPortal() {
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://varunka-janshakti-backend.hf.space';
 
   const [tab, setTab] = useState<'file' | 'track'>('file');
   const [contactPhone, setContactPhone] = useState('');

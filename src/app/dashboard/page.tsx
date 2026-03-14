@@ -5,7 +5,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, 
 import { MapPin, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
 import { mockTrendData, mockAlerts, mockActionQueue, mockWardHeatData, mockCategoryDistribution, PRIORITY_COLORS, STATUS_CONFIG } from '@/lib/mockData';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://varunka-janshakti-backend.hf.space';
 
 interface LiveComplaint {
   id: number;
