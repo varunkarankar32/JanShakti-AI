@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { mockTrendData, mockAlerts, mockActionQueue, mockWardHeatData, mockCategoryDistribution, PRIORITY_CONFIG, STATUS_CONFIG } from '@/lib/mockData';
+import { mockTrendData, mockAlerts, mockActionQueue, mockWardHeatData, mockCategoryDistribution, STATUS_CONFIG } from '@/lib/mockData';
 
 interface LiveComplaint {
   id: number;
@@ -52,35 +52,160 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [backendOnline, setBackendOnline] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [secondsSinceUpdate, setSecondsSinceUpdate] = useState(0);
+
+  const [leaderToken, setLeaderToken] = useState('');
+  const [leaderUser, setLeaderUser] = useState<{ id: number; name: string; email: string; role: string } | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [leaderEmail, setLeaderEmail] = useState('');
+  const [leaderPassword, setLeaderPassword] = useState('');
+
+  const handleLeaderLogout = useCallback(() => {
+    setLeaderToken('');
+    setLeaderUser(null);
+    setStats(null);
+    setComplaints([]);
+    localStorage.removeItem('leader_token');
+    localStorage.removeItem('leader_user');
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem('leader_token') || '';
+    const userRaw = localStorage.getItem('leader_user');
+
+    if (!token || !userRaw) {
+      setAuthChecking(false);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(userRaw) as { id: number; name: string; email: string; role: string };
+      setLeaderToken(token);
+      setLeaderUser(parsed);
+    } catch {
+      localStorage.removeItem('leader_token');
+      localStorage.removeItem('leader_user');
+    } finally {
+      setAuthChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!leaderToken) return;
+
+    fetch('/api/auth/me', {
+      headers: { Authorization: `Bearer ${leaderToken}` },
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          handleLeaderLogout();
+          return;
+        }
+
+        const user = await res.json();
+        if (user?.role !== 'leader') {
+          setAuthError('Only leader accounts can access this dashboard.');
+          handleLeaderLogout();
+          return;
+        }
+
+        setLeaderUser(user);
+        localStorage.setItem('leader_user', JSON.stringify(user));
+      })
+      .catch(() => {
+        handleLeaderLogout();
+      });
+  }, [leaderToken, handleLeaderLogout]);
+
+  useEffect(() => {
+    if (!lastUpdated) {
+      setSecondsSinceUpdate(0);
+      return;
+    }
+
+    const updateClock = () => {
+      const elapsed = Math.max(0, Math.round((new Date().getTime() - lastUpdated.getTime()) / 1000));
+      setSecondsSinceUpdate(elapsed);
+    };
+
+    updateClock();
+    const timer = setInterval(updateClock, 1000);
+    return () => clearInterval(timer);
+  }, [lastUpdated]);
 
   const fetchData = useCallback(async () => {
+    if (!leaderToken) return;
+
     try {
+      const headers = { Authorization: `Bearer ${leaderToken}` };
       const [complaintsRes, statsRes] = await Promise.all([
-        fetch('/api/complaints?limit=50'),
-        fetch('/api/dashboard/stats'),
+        fetch('/api/complaints?limit=50', { headers }),
+        fetch('/api/dashboard/stats', { headers }),
       ]);
+
+      if (statsRes.status === 401 || statsRes.status === 403) {
+        setAuthError('Leader session expired. Please login again.');
+        handleLeaderLogout();
+        setBackendOnline(false);
+        return;
+      }
 
       if (complaintsRes.ok) {
         const data = await complaintsRes.json();
         setComplaints(data.complaints || []);
-        setBackendOnline(true);
-        setLastUpdated(new Date());
       }
 
       if (statsRes.ok) {
         const data = await statsRes.json();
         setStats(data);
+        setBackendOnline(true);
+        setLastUpdated(new Date());
+      } else {
+        setBackendOnline(false);
       }
     } catch {
       setBackendOnline(false);
     }
-  }, []);
+  }, [leaderToken, handleLeaderLogout]);
 
   useEffect(() => {
+    if (!leaderToken || !leaderUser) return;
     fetchData();
-    const interval = setInterval(fetchData, 15000); // Auto-refresh every 15s
+    const interval = setInterval(fetchData, 15000);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [fetchData, leaderToken, leaderUser]);
+
+  const handleLeaderLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+
+    try {
+      const res = await fetch('/api/auth/leader/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: leaderEmail.trim(), password: leaderPassword }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data?.detail || 'Unable to login as leader.');
+        return;
+      }
+
+      setLeaderToken(data.token);
+      setLeaderUser(data.user);
+      localStorage.setItem('leader_token', data.token);
+      localStorage.setItem('leader_user', JSON.stringify(data.user));
+      setLeaderPassword('');
+    } catch {
+      setAuthError('Cannot connect to auth service.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
 
   const kpis = stats ? [
     { label: 'Issues Tracked', value: String(stats.total_complaints), icon: '📋', color: '#3b82f6', change: `${stats.complaints_today} today` },
@@ -89,6 +214,65 @@ export default function DashboardPage() {
     { label: 'Pending Verify', value: String(stats.pending_verification), icon: '⚡', color: '#f59e0b', change: 'Awaiting check' },
     { label: 'Satisfaction', value: stats.satisfaction > 0 ? `${stats.satisfaction}/5` : 'N/A', icon: '⭐', color: '#8b5cf6', change: 'Citizen rating' },
   ] : DEFAULT_KPIS;
+
+  if (authChecking) {
+    return (
+      <main className="main-content" style={{ minHeight: 'calc(100vh - var(--nav-height))', display: 'grid', placeItems: 'center', background: 'var(--bg-secondary)' }}>
+        <div className="glass-card" style={{ width: 'min(420px, 92vw)', textAlign: 'center' }}>
+          <h2 style={{ fontSize: '1.2rem', marginBottom: 8 }}>Verifying Leader Session</h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Checking authentication...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!leaderToken || !leaderUser || leaderUser.role !== 'leader') {
+    return (
+      <main className="main-content" style={{ minHeight: 'calc(100vh - var(--nav-height))', display: 'grid', placeItems: 'center', background: 'var(--bg-secondary)' }}>
+        <div className="glass-card" style={{ width: 'min(460px, 94vw)', padding: 28 }}>
+          <div className="section-label" style={{ marginBottom: 10 }}>LEADER ACCESS</div>
+          <h1 style={{ fontSize: '1.5rem', marginBottom: 8 }}>Leader Dashboard Login</h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 18 }}>
+            Dashboard data is restricted to authenticated leader accounts only.
+          </p>
+
+          <form onSubmit={handleLeaderLogin}>
+            <div className="form-group">
+              <label className="form-label">Leader Email</label>
+              <input
+                type="email"
+                className="form-input"
+                value={leaderEmail}
+                onChange={(e) => setLeaderEmail(e.target.value)}
+                placeholder="leader@janshakti.ai"
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Password</label>
+              <input
+                type="password"
+                className="form-input"
+                value={leaderPassword}
+                onChange={(e) => setLeaderPassword(e.target.value)}
+                placeholder="Enter leader password"
+                required
+              />
+            </div>
+
+            <button type="submit" className="btn btn-primary" disabled={authLoading} style={{ width: '100%', justifyContent: 'center' }}>
+              {authLoading ? 'Signing in...' : 'Login to Leader Dashboard'}
+            </button>
+          </form>
+
+          {authError && <div style={{ marginTop: 12, color: '#b91c1c', fontSize: '0.85rem' }}>✕ {authError}</div>}
+          <div style={{ marginTop: 12, fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
+            Default leader email: leader@janshakti.ai
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="main-content">
@@ -136,7 +320,7 @@ export default function DashboardPage() {
           <div style={{ padding: '24px 12px 8px' }}>
             <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginBottom: 4 }}>Last Updated</div>
             <div style={{ fontSize: '0.8rem', color: 'var(--accent-blue-light)', fontWeight: 600 }}>
-              {lastUpdated ? `${Math.round((Date.now() - lastUpdated.getTime()) / 1000)}s ago` : 'Loading...'}
+              {lastUpdated ? `${secondsSinceUpdate}s ago` : 'Loading...'}
             </div>
             <button onClick={fetchData} style={{
               marginTop: 8, width: '100%', padding: '6px 0', borderRadius: 6,
@@ -159,9 +343,13 @@ export default function DashboardPage() {
                 {backendOnline ? 'Live data from AI backend — auto-refreshes every 15 seconds' : '⚠️ Backend offline — start it with: uvicorn main:app --port 8000'}
               </p>
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: backendOnline ? '#22c55e' : '#ef4444', animation: backendOnline ? 'pulse 2s infinite' : 'none' }} />
               <span style={{ fontSize: '0.8rem', color: backendOnline ? '#22c55e' : '#ef4444' }}>{backendOnline ? 'Live' : 'Offline'}</span>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>{leaderUser.name}</span>
+              <button className="btn btn-secondary" onClick={handleLeaderLogout} style={{ padding: '6px 12px', fontSize: '0.75rem' }}>
+                Logout
+              </button>
             </div>
           </div>
 

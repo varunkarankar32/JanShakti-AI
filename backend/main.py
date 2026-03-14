@@ -33,9 +33,10 @@ app.add_middleware(
 )
 
 # Import and register routers
-from routers import complaints, nlp, priority, sentiment, vision, speech, reports, dashboard, whatsapp
+from routers import complaints, nlp, priority, sentiment, vision, speech, reports, dashboard, whatsapp, auth
 
 app.include_router(complaints.router, prefix=API_PREFIX)
+app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(nlp.router, prefix=API_PREFIX)
 app.include_router(priority.router, prefix=API_PREFIX)
 app.include_router(sentiment.router, prefix=API_PREFIX)
@@ -66,6 +67,9 @@ def root():
         "docs": "/docs",
         "endpoints": {
             "complaints": f"{API_PREFIX}/complaints",
+            "auth_signup": f"{API_PREFIX}/auth/signup",
+            "auth_login": f"{API_PREFIX}/auth/login",
+            "auth_leader_login": f"{API_PREFIX}/auth/leader/login",
             "nlp_classify": f"{API_PREFIX}/nlp/classify",
             "priority_score": f"{API_PREFIX}/priority/score",
             "sentiment_analyze": f"{API_PREFIX}/sentiment/analyze",

@@ -10,3 +10,13 @@ CLASSIFIER_MODEL_PATH = os.getenv("CLASSIFIER_MODEL_PATH", "ml/weights/classifie
 SENTIMENT_MODEL = os.getenv("SENTIMENT_MODEL", "distilbert-base-uncased-finetuned-sst-2-english")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 API_PREFIX = "/api"
+
+# Auth / JWT
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-in-production")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
+
+# Bootstrap leader account (for local setup)
+DEFAULT_LEADER_NAME = os.getenv("DEFAULT_LEADER_NAME", "District Leader")
+DEFAULT_LEADER_EMAIL = os.getenv("DEFAULT_LEADER_EMAIL", "leader@janshakti.ai")
+DEFAULT_LEADER_PASSWORD = os.getenv("DEFAULT_LEADER_PASSWORD", "Leader@123")

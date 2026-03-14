@@ -342,7 +342,7 @@ img {
   list-style: none;
 }
 
-.nav-links a {
+.nav-links a:not(.btn) {
   color: var(--text-secondary);
   font-size: 0.85rem;
   font-weight: 500;
@@ -350,11 +350,11 @@ img {
   position: relative;
 }
 
-.nav-links a:hover {
+.nav-links a:not(.btn):hover {
   color: var(--accent-blue);
 }
 
-.nav-links a::after {
+.nav-links a:not(.btn)::after {
   content: '';
   position: absolute;
   bottom: -4px;
@@ -366,7 +366,7 @@ img {
   border-radius: 1px;
 }
 
-.nav-links a:hover::after {
+.nav-links a:not(.btn):hover::after {
   width: 100%;
 }
 
@@ -393,9 +393,9 @@ img {
    Footer
    ============================================ */
 .footer {
-  background: #0F172A;
-  color: #E2E8F0;
-  border-top: 3px solid var(--accent-blue);
+  background: #FFFFFF;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border-subtle);
   padding: 48px 0 24px;
 }
 
@@ -411,12 +411,12 @@ img {
 .footer-brand h3 {
   font-family: 'Outfit', sans-serif;
   font-size: 1.2rem;
-  color: #F8FAFC;
+  color: var(--text-primary);
   margin-bottom: 10px;
 }
 
 .footer-brand p {
-  color: #94A3B8;
+  color: var(--text-secondary);
   font-size: 0.85rem;
   line-height: 1.7;
 }
@@ -424,7 +424,7 @@ img {
 .footer-col h4 {
   font-size: 0.75rem;
   font-weight: 700;
-  color: #64748B;
+  color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 1px;
   margin-bottom: 14px;
@@ -434,19 +434,19 @@ img {
 .footer-col li { margin-bottom: 8px; }
 
 .footer-col a {
-  color: #94A3B8;
+  color: var(--text-secondary);
   font-size: 0.85rem;
   transition: color var(--transition-fast);
 }
 
-.footer-col a:hover { color: #60A5FA; }
+.footer-col a:hover { color: var(--accent-blue); }
 
 .footer-bottom {
   text-align: center;
   padding-top: 24px;
   margin-top: 32px;
-  border-top: 1px solid #1E293B;
-  color: #64748B;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
   font-size: 0.8rem;
   max-width: var(--container-max);
   margin-left: auto;
@@ -477,8 +477,8 @@ img {
 }
 
 .sidebar-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #E2E8F0;
+  background: #EFF6FF;
+  color: var(--accent-blue);
 }
 
 .sidebar-item.active {

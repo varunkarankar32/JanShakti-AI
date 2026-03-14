@@ -6,14 +6,19 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from models.complaint import Complaint, ComplaintStatus, PriorityLevel
+from models.user import User
 from database import get_db
-from datetime import datetime, timedelta
+from routers.auth import get_current_leader
+from datetime import datetime
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
 @router.get("/stats")
-def get_dashboard_stats(db: Session = Depends(get_db)):
+def get_dashboard_stats(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_leader),
+):
     """
     Get aggregated dashboard statistics.
     Returns KPIs, category distribution, trend data, alerts, action queue.

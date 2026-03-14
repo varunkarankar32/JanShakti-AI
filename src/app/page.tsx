@@ -84,29 +84,29 @@ export default function HomePage() {
       {/* ============ HERO ============ */}
       <section style={{
         minHeight: '92vh', display: 'flex', alignItems: 'center',
-        background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F172A 100%)',
-        position: 'relative', overflow: 'hidden', color: 'white',
+        background: 'linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 45%, #F1F5F9 100%)',
+        position: 'relative', overflow: 'hidden',
       }}>
-        <div style={{ position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)', backgroundSize: '48px 48px' }} />
+        <div style={{ position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(15,23,42,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.03) 1px, transparent 1px)', backgroundSize: '48px 48px' }} />
         <div className="container" style={{ position: 'relative', zIndex: 1, paddingTop: 40, paddingBottom: 40 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
-            <span style={{ padding: '5px 14px', borderRadius: 6, background: 'rgba(37,99,235,0.2)', color: '#93C5FD', fontSize: '0.78rem', fontWeight: 600, border: '1px solid rgba(37,99,235,0.3)' }}>
+            <span style={{ padding: '5px 14px', borderRadius: 6, background: '#EFF6FF', color: '#1E40AF', fontSize: '0.78rem', fontWeight: 600, border: '1px solid #BFDBFE' }}>
               🏛️ AI-Powered Governance Platform
             </span>
           </div>
           <h1 style={{ fontSize: 'clamp(2.2rem, 5vw, 3.8rem)', fontWeight: 900, lineHeight: 1.1, marginBottom: 20, maxWidth: 780 }}>
-            जनशक्ति<span style={{ color: '#60A5FA' }}>.AI</span>
+            जनशक्ति<span style={{ color: '#1E40AF' }}>.AI</span>
             <br />
-            <span style={{ fontSize: '0.5em', fontWeight: 500, color: '#94A3B8' }}>
+            <span style={{ fontSize: '0.5em', fontWeight: 500, color: '#475569' }}>
               AI for Local Leadership, Decision Intelligence & Public Trust
             </span>
           </h1>
-          <p style={{ fontSize: '1.05rem', color: '#94A3B8', maxWidth: 560, lineHeight: 1.7, marginBottom: 28 }}>
+          <p style={{ fontSize: '1.05rem', color: '#334155', maxWidth: 560, lineHeight: 1.7, marginBottom: 28 }}>
             When Ramesh from Ward 7 reports a broken water pipe at 6 AM, his leader should know by 6:01 and the repair crew by 6:05.
           </p>
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: 48 }}>
             <Link href="/citizen" className="btn btn-primary" style={{ padding: '12px 28px', fontSize: '0.95rem' }}>🚀 File a Complaint</Link>
-            <Link href="/dashboard" className="btn" style={{ padding: '12px 28px', fontSize: '0.95rem', background: 'rgba(255,255,255,0.08)', color: 'white', border: '1px solid rgba(255,255,255,0.15)' }}>📊 Leader Dashboard</Link>
+            <Link href="/dashboard" className="btn btn-secondary" style={{ padding: '12px 28px', fontSize: '0.95rem' }}>📊 Leader Dashboard</Link>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 16, maxWidth: 600 }}>
             {[
@@ -114,11 +114,11 @@ export default function HomePage() {
               { val: 18, suf: ' days', label: 'avg complaint time' },
               { val: 3, suf: '.8L Cr', label: 'lost to poor governance' },
             ].map((s, i) => (
-              <div key={i} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 16, textAlign: 'center' }}>
-                <div style={{ fontSize: 'clamp(1.5rem, 3vw, 2.2rem)', fontWeight: 800, fontFamily: 'Outfit', color: '#60A5FA' }}>
+              <div key={i} style={{ background: 'rgba(255,255,255,0.96)', border: '1px solid #E2E8F0', borderRadius: 10, padding: 16, textAlign: 'center', boxShadow: 'var(--shadow-sm)' }}>
+                <div style={{ fontSize: 'clamp(1.5rem, 3vw, 2.2rem)', fontWeight: 800, fontFamily: 'Outfit', color: '#1E40AF' }}>
                   {i === 2 ? '₹' : ''}<AnimatedCounter end={s.val} suffix={s.suf} />
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: 4 }}>{s.label}</div>
+                <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: 4 }}>{s.label}</div>
               </div>
             ))}
           </div>
@@ -268,19 +268,19 @@ export default function HomePage() {
       </section>
 
       {/* ============ CTA ============ */}
-      <section className="section" style={{ background: '#0F172A', textAlign: 'center', color: 'white' }}>
+      <section className="section" style={{ background: '#F8FAFC', textAlign: 'center', borderTop: '1px solid var(--border-subtle)' }}>
         <div className="container" style={{ maxWidth: 640 }}>
-          <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.6rem)', fontWeight: 800, marginBottom: 14, color: '#F8FAFC' }}>
+          <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.6rem)', fontWeight: 800, marginBottom: 14, color: 'var(--text-primary)' }}>
             Build the Future of Transparent Governance
           </h2>
-          <p style={{ color: '#94A3B8', fontSize: '1rem', lineHeight: 1.7, marginBottom: 28 }}>Empowering Leaders · Restoring Trust · Transforming Governance</p>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', lineHeight: 1.7, marginBottom: 28 }}>Empowering Leaders · Restoring Trust · Transforming Governance</p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
             <Link href="/citizen" className="btn btn-primary" style={{ padding: '12px 28px' }}>🚀 File a Complaint</Link>
-            <Link href="/dashboard" className="btn" style={{ padding: '12px 28px', background: 'rgba(255,255,255,0.08)', color: 'white', border: '1px solid rgba(255,255,255,0.15)' }}>📊 Explore Dashboard</Link>
+            <Link href="/dashboard" className="btn btn-secondary" style={{ padding: '12px 28px' }}>📊 Explore Dashboard</Link>
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 32, flexWrap: 'wrap' }}>
             {['🇮🇳 India-First', '📱 Mobile-First', '📡 Offline-Ready', '🔗 Interoperable', '🔒 Encrypted'].map(c => (
-              <span key={c} style={{ padding: '4px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', fontSize: '0.75rem', color: '#94A3B8' }}>{c}</span>
+              <span key={c} style={{ padding: '4px 12px', borderRadius: 6, background: '#FFFFFF', border: '1px solid #E2E8F0', fontSize: '0.75rem', color: '#475569' }}>{c}</span>
             ))}
           </div>
         </div>

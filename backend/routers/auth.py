@@ -1,15 +1,18 @@
 """
-Auth Router — Signup, Login, and current user endpoints.
-Uses JWT tokens (python-jose) and bcrypt hashing (passlib).
+Auth Router — Signup, Login, leader login, and current user endpoints.
+Uses JWT tokens and PBKDF2-SHA256 hashing.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta, timezone
+import base64
+import hashlib
+import hmac
+import secrets
 from jose import jwt, JWTError
-from passlib.context import CryptContext
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from database import get_db
@@ -18,8 +21,8 @@ from config import JWT_SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRE_MINUTES
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
+PBKDF2_ITERATIONS = 120_000
 
 
 # --- Schemas ---
@@ -46,21 +49,43 @@ class UserResponse(BaseModel):
     name: str
     email: str
     phone: Optional[str]
+    role: str
 
 
 # --- Helpers ---
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        PBKDF2_ITERATIONS,
+    )
+    digest_b64 = base64.urlsafe_b64encode(digest).decode("utf-8")
+    return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${salt}${digest_b64}"
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        algorithm, iterations, salt, digest_b64 = hashed.split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        computed = hashlib.pbkdf2_hmac(
+            "sha256",
+            plain.encode("utf-8"),
+            salt.encode("utf-8"),
+            int(iterations),
+        )
+        expected = base64.urlsafe_b64decode(digest_b64.encode("utf-8"))
+        return hmac.compare_digest(computed, expected)
+    except Exception:
+        return False
 
 
-def create_token(user_id: int, email: str) -> str:
+def create_token(user_id: int, email: str, role: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
-    payload = {"sub": str(user_id), "email": email, "exp": expire}
+    payload = {"sub": str(user_id), "email": email, "role": role, "exp": expire}
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
 
@@ -82,6 +107,25 @@ def get_current_user(
     return user
 
 
+def get_current_leader(current_user: User = Depends(get_current_user)) -> User:
+    if (current_user.role or "citizen") != "leader":
+        raise HTTPException(status_code=403, detail="Leader access required")
+    return current_user
+
+
+def _auth_payload(user: User) -> dict:
+    return {
+        "token": create_token(user.id, user.email, user.role or "citizen"),
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "phone": user.phone,
+            "role": user.role or "citizen",
+        },
+    }
+
+
 # --- Endpoints ---
 
 @router.post("/signup", response_model=AuthResponse)
@@ -95,17 +139,14 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
         name=req.name,
         email=req.email,
         phone=req.phone,
+        role="citizen",
         hashed_password=hash_password(req.password),
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    token = create_token(user.id, user.email)
-    return {
-        "token": token,
-        "user": {"id": user.id, "name": user.name, "email": user.email, "phone": user.phone},
-    }
+    return _auth_payload(user)
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -115,11 +156,17 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if not user or not verify_password(req.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    token = create_token(user.id, user.email)
-    return {
-        "token": token,
-        "user": {"id": user.id, "name": user.name, "email": user.email, "phone": user.phone},
-    }
+    return _auth_payload(user)
+
+
+@router.post("/leader/login", response_model=AuthResponse)
+def leader_login(req: LoginRequest, db: Session = Depends(get_db)):
+    """Login endpoint that only allows leader accounts."""
+    user = db.query(User).filter(User.email == req.email).first()
+    if not user or (user.role or "citizen") != "leader" or not verify_password(req.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid leader credentials")
+
+    return _auth_payload(user)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -130,4 +177,5 @@ def get_me(current_user: User = Depends(get_current_user)):
         "name": current_user.name,
         "email": current_user.email,
         "phone": current_user.phone,
+        "role": current_user.role or "citizen",
     }

@@ -18,12 +18,18 @@ from services.nlp_service import nlp_service
 from services.priority_engine import priority_engine
 from services.sentiment_service import sentiment_service
 from config import UPLOAD_DIR
+from routers.auth import get_current_user
+from models.user import User
 
 router = APIRouter(prefix="/complaints", tags=["Complaints"])
 
 
 @router.post("/", response_model=ComplaintResponse)
-def create_complaint(complaint: ComplaintCreate, db: Session = Depends(get_db)):
+def create_complaint(
+    complaint: ComplaintCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Create a new complaint with AI auto-classification and priority scoring.
     """
@@ -63,8 +69,8 @@ def create_complaint(complaint: ComplaintCreate, db: Session = Depends(get_db)):
         location=complaint.location or entities.get("location", ""),
         latitude=complaint.latitude,
         longitude=complaint.longitude,
-        citizen_name=complaint.citizen_name,
-        citizen_phone=complaint.citizen_phone,
+        citizen_name=current_user.name,
+        citizen_phone=current_user.phone or complaint.citizen_phone,
         priority=priority_level,
         ai_score=priority_result["score"],
         urgency_score=priority_result["urgency"],
