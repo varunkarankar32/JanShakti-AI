@@ -122,7 +122,7 @@ export default function CitizenPortal() {
   useEffect(() => {
     if (!authToken) return;
 
-    fetch('/api/auth/me', {
+    fetch(`${API_BASE}/api/auth/me`, {
       headers: { Authorization: `Bearer ${authToken}`, 'Cache-Control': 'no-cache' },
     })
       .then(async (res) => {
@@ -162,7 +162,7 @@ export default function CitizenPortal() {
 
   // Check backend health + load complaints
   useEffect(() => {
-    fetch('/api/complaints/?limit=20')
+    fetch(`${API_BASE}/api/complaints/?limit=20`)
       .then(r => r.json())
       .then((data: { complaints?: Array<Partial<SubmittedComplaint>> }) => {
         setBackendOnline(true);
@@ -282,7 +282,7 @@ export default function CitizenPortal() {
         const audioData = new FormData();
         audioData.append('audio', audioFile);
 
-        const transcribeRes = await fetch('/api/speech/transcribe', {
+        const transcribeRes = await fetch(`${API_BASE}/api/speech/transcribe`, {
           method: 'POST',
           body: audioData,
         });
@@ -301,7 +301,7 @@ export default function CitizenPortal() {
         const imageData = new FormData();
         imageData.append('image', photoFile);
 
-        const detectRes = await fetch('/api/vision/detect', {
+        const detectRes = await fetch(`${API_BASE}/api/vision/detect`, {
           method: 'POST',
           body: imageData,
         });
@@ -379,7 +379,7 @@ export default function CitizenPortal() {
     setTrackedResult(null);
 
     try {
-      const res = await fetch(`/api/complaints/${trackingId.trim().toUpperCase()}`);
+      const res = await fetch(`${API_BASE}/api/complaints/${trackingId.trim().toUpperCase()}`);
       if (res.ok) {
         const data = await res.json();
         setTrackedResult(data);

@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { mockTrendData, mockAlerts, mockActionQueue, mockWardHeatData, mockCategoryDistribution, STATUS_CONFIG } from '@/lib/mockData';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { MapPin, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { mockTrendData, mockAlerts, mockActionQueue, mockWardHeatData, mockCategoryDistribution, PRIORITY_COLORS, STATUS_CONFIG } from '@/lib/mockData';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
 
 interface LiveComplaint {
   id: number;
@@ -104,7 +108,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!leaderToken) return;
 
-    fetch('/api/auth/me', {
+    fetch(`${API_BASE}/api/auth/me`, {
       headers: { Authorization: `Bearer ${leaderToken}` },
     })
       .then(async (res) => {
@@ -150,8 +154,8 @@ export default function DashboardPage() {
     try {
       const headers = { Authorization: `Bearer ${leaderToken}` };
       const [complaintsRes, statsRes] = await Promise.all([
-        fetch('/api/complaints/?limit=50', { headers }),
-        fetch('/api/dashboard/stats', { headers }),
+        fetch(`${API_BASE}/api/complaints/?limit=50`, { headers }),
+        fetch(`${API_BASE}/api/dashboard/stats`, { headers }),
       ]);
 
       if (statsRes.status === 401 || statsRes.status === 403) {
@@ -192,7 +196,7 @@ export default function DashboardPage() {
     setAuthError('');
 
     try {
-      const res = await fetch('/api/auth/leader/login', {
+      const res = await fetch(`${API_BASE}/api/auth/leader/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: leaderEmail.trim(), password: leaderPassword }),
