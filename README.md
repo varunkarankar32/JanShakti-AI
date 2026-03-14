@@ -64,7 +64,7 @@ cd backend
 pip install -r requirements.txt
 
 # Run the FastAPI server
-uvicorn main:app --reload --port 8000
+uvicorn main:app --host 127.0.0.1 --port 8000
 # → Swagger API Docs accessible at http://localhost:8000/docs
 3. Model Training (Optional)
 If you wish to retrain the AI models locally:

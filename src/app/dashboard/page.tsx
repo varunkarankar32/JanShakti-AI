@@ -150,7 +150,7 @@ export default function DashboardPage() {
     try {
       const headers = { Authorization: `Bearer ${leaderToken}` };
       const [complaintsRes, statsRes] = await Promise.all([
-        fetch('/api/complaints?limit=50', { headers }),
+        fetch('/api/complaints/?limit=50', { headers }),
         fetch('/api/dashboard/stats', { headers }),
       ]);
 

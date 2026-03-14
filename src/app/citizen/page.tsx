@@ -65,7 +65,7 @@ function isTokenExpired(token: string): boolean {
 }
 
 export default function CitizenPortal() {
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
 
   const [tab, setTab] = useState<'file' | 'track'>('file');
   const [contactPhone, setContactPhone] = useState('');
@@ -117,7 +117,7 @@ export default function CitizenPortal() {
         setAuthMode('login');
       }
     }
-  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!authToken) return;
@@ -134,7 +134,7 @@ export default function CitizenPortal() {
       .catch(() => {
         // Network error (backend temporarily down) — do NOT log out
       });
-  }, [authToken]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authToken]);
 
   useEffect(() => {
     if (!authToken) {
@@ -162,7 +162,7 @@ export default function CitizenPortal() {
 
   // Check backend health + load complaints
   useEffect(() => {
-    fetch('/api/complaints?limit=20')
+    fetch('/api/complaints/?limit=20')
       .then(r => r.json())
       .then((data: { complaints?: Array<Partial<SubmittedComplaint>> }) => {
         setBackendOnline(true);
