@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { CATEGORIES, WARDS, STATUS_CONFIG } from '@/lib/mockData';
+import { getBackendBaseUrl } from '@/lib/apiBase';
 
 interface SubmittedComplaint {
   id: string;
@@ -65,7 +66,7 @@ function isTokenExpired(token: string): boolean {
 }
 
 export default function CitizenPortal() {
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://varunka-janshakti-backend.hf.space';
+  const API_BASE = getBackendBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL);
 
   const [tab, setTab] = useState<'file' | 'track'>('file');
   const [contactPhone, setContactPhone] = useState('');
@@ -126,7 +127,12 @@ export default function CitizenPortal() {
       headers: { Authorization: `Bearer ${authToken}`, 'Cache-Control': 'no-cache' },
     })
       .then(async (res) => {
-        if (!res.ok) return; // Keep user in — any issues handled at submit time
+        if (res.status === 401) {
+          handleLogout();
+          setAuthError('Your session expired. Please log in again to continue.');
+          return;
+        }
+        if (!res.ok) return;
         const user = await res.json();
         setAuthUser(user);
         setContactPhone(user?.phone || '');
@@ -213,7 +219,7 @@ export default function CitizenPortal() {
         ? { name: authName.trim(), email: authEmail.trim(), phone: authPhone.trim() || null, password: authPassword }
         : { email: authEmail.trim(), password: authPassword };
 
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
