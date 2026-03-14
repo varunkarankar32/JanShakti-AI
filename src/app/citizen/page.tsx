@@ -1,16 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CATEGORIES, WARDS, PRIORITY_CONFIG, STATUS_CONFIG } from '@/lib/mockData';
 
 interface SubmittedComplaint {
   id: string;
+  ticket_id: string;
   title: string;
   category: string;
   ward: string;
   priority: string;
   status: string;
-  timestamp: string;
+  ai_score: number;
+  input_mode: string;
+  created_at: string;
 }
 
 export default function CitizenPortal() {
@@ -22,27 +25,92 @@ export default function CitizenPortal() {
   const [description, setDescription] = useState('');
   const [inputMode, setInputMode] = useState<'text' | 'voice' | 'photo'>('text');
   const [submitted, setSubmitted] = useState(false);
-  const [complaints, setComplaints] = useState<SubmittedComplaint[]>([
-    { id: 'TKT-4521', title: 'Water pipe burst on Main Road', category: 'Water Supply', ward: 'Ward 7', priority: 'P0', status: 'in_progress', timestamp: '2026-03-11T06:00:00' },
-    { id: 'TKT-4529', title: 'Water contamination in Sector 8', category: 'Water Supply', ward: 'Ward 8', priority: 'P0', status: 'resolved', timestamp: '2026-03-05T07:00:00' },
-  ]);
+  const [submitting, setSubmitting] = useState(false);
+  const [lastTicket, setLastTicket] = useState('');
+  const [complaints, setComplaints] = useState<SubmittedComplaint[]>([]);
   const [trackingId, setTrackingId] = useState('');
+  const [trackedResult, setTrackedResult] = useState<any>(null);
+  const [trackError, setTrackError] = useState('');
   const [rating, setRating] = useState(0);
+  const [backendOnline, setBackendOnline] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Check backend health + load complaints
+  useEffect(() => {
+    fetch('/api/complaints?limit=20')
+      .then(r => r.json())
+      .then(data => {
+        setBackendOnline(true);
+        if (data.complaints) {
+          setComplaints(data.complaints.map((c: any) => ({
+            id: c.ticket_id,
+            ticket_id: c.ticket_id,
+            title: c.title,
+            category: c.category,
+            ward: c.ward,
+            priority: c.priority,
+            status: c.status,
+            ai_score: c.ai_score,
+            input_mode: c.input_mode,
+            created_at: c.created_at,
+          })));
+        }
+      })
+      .catch(() => setBackendOnline(false));
+  }, [submitted]);
+
+  // Submit complaint to real backend
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newId = `TKT-${4530 + complaints.length + 1}`;
-    const newComplaint: SubmittedComplaint = {
-      id: newId, title: description.slice(0, 50), category, ward,
-      priority: 'P2', status: 'open', timestamp: new Date().toISOString(),
-    };
-    setComplaints(prev => [newComplaint, ...prev]);
-    setSubmitted(true);
-    setTimeout(() => setSubmitted(false), 5000);
-    setDescription(''); setName(''); setPhone('');
+    setSubmitting(true);
+
+    try {
+      const res = await fetch('/api/complaints/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: description.slice(0, 80),
+          description,
+          category,
+          ward,
+          citizen_name: name,
+          citizen_phone: phone,
+          input_mode: inputMode,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setLastTicket(data.ticket_id);
+        setSubmitted(true);
+        setTimeout(() => setSubmitted(false), 8000);
+        setDescription(''); setName(''); setPhone(''); setCategory(''); setWard('');
+      } else {
+        alert('Failed to submit. Is the backend running?');
+      }
+    } catch {
+      alert('Cannot connect to backend. Make sure to run: cd backend && uvicorn main:app --reload --port 8000');
+    }
+    setSubmitting(false);
   };
 
-  const trackedComplaint = complaints.find(c => c.id.toLowerCase() === trackingId.toLowerCase());
+  // Track complaint from backend
+  const handleTrack = async () => {
+    if (!trackingId) return;
+    setTrackError('');
+    setTrackedResult(null);
+
+    try {
+      const res = await fetch(`/api/complaints/${trackingId.trim().toUpperCase()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTrackedResult(data);
+      } else {
+        setTrackError('Ticket not found. Check the ID and try again.');
+      }
+    } catch {
+      setTrackError('Cannot connect to backend.');
+    }
+  };
 
   return (
     <main className="main-content">
@@ -50,9 +118,22 @@ export default function CitizenPortal() {
         <div className="container">
           <div className="section-label">CITIZEN PORTAL</div>
           <h1 className="section-title">Your Voice Matters</h1>
-          <p className="section-subtitle" style={{ marginBottom: 32 }}>
+          <p className="section-subtitle" style={{ marginBottom: 16 }}>
             Report issues, track progress, and rate the resolution — all in one place
           </p>
+
+          {/* Backend Status */}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '6px 16px', borderRadius: 20, marginBottom: 24,
+            background: backendOnline ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+            border: `1px solid ${backendOnline ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+            fontSize: '0.8rem', fontWeight: 600,
+            color: backendOnline ? '#16a34a' : '#dc2626',
+          }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: backendOnline ? '#22c55e' : '#ef4444' }} />
+            {backendOnline ? 'AI Backend Connected' : 'Backend Offline — Start with: uvicorn main:app --port 8000'}
+          </div>
 
           {/* Tab Switcher */}
           <div style={{ display: 'flex', gap: 12, marginBottom: 32 }}>
@@ -123,43 +204,16 @@ export default function CitizenPortal() {
                     </div>
                   </div>
 
-                  {inputMode === 'text' && (
-                    <div className="form-group">
-                      <label className="form-label">Describe the Issue</label>
-                      <textarea className="form-textarea" value={description} onChange={e => setDescription(e.target.value)} placeholder="Describe the problem in detail..." required />
-                    </div>
-                  )}
+                  <div className="form-group">
+                    <label className="form-label">Describe the Issue</label>
+                    <textarea className="form-textarea" value={description} onChange={e => setDescription(e.target.value)} placeholder="Describe the problem in detail..." required />
+                  </div>
 
-                  {inputMode === 'voice' && (
-                    <div className="form-group">
-                      <label className="form-label">Record Voice Note</label>
-                      <div style={{
-                        background: 'var(--bg-tertiary)', borderRadius: 12, padding: 24, textAlign: 'center',
-                        border: '2px dashed var(--border-accent)', cursor: 'pointer',
-                      }}>
-                        <div style={{ fontSize: '3rem', marginBottom: 8, animation: 'pulse 2s infinite' }}>🎤</div>
-                        <div style={{ color: 'var(--text-secondary)' }}>Tap to start recording</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: 4 }}>Supports Hindi, Bhojpuri, Tamil, and 9+ languages</div>
-                      </div>
-                    </div>
-                  )}
-
-                  {inputMode === 'photo' && (
-                    <div className="form-group">
-                      <label className="form-label">Upload Photo</label>
-                      <div style={{
-                        background: 'var(--bg-tertiary)', borderRadius: 12, padding: 24, textAlign: 'center',
-                        border: '2px dashed var(--border-accent)', cursor: 'pointer',
-                      }}>
-                        <div style={{ fontSize: '3rem', marginBottom: 8 }}>📸</div>
-                        <div style={{ color: 'var(--text-secondary)' }}>Click to upload or drag & drop</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: 4 }}>GPS will be auto-captured · AI will detect issue type</div>
-                      </div>
-                    </div>
-                  )}
-
-                  <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}>
-                    🚀 Submit Complaint
+                  <button type="submit" className="btn btn-primary" disabled={submitting} style={{
+                    width: '100%', justifyContent: 'center', marginTop: 8,
+                    opacity: submitting ? 0.7 : 1,
+                  }}>
+                    {submitting ? '⏳ Filing with AI...' : '🚀 Submit Complaint'}
                   </button>
                 </form>
 
@@ -169,16 +223,18 @@ export default function CitizenPortal() {
                     background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)',
                     animation: 'fadeInUp 0.5s ease',
                   }}>
-                    <div style={{ fontWeight: 700, color: '#22c55e', marginBottom: 4 }}>✅ Complaint Submitted Successfully!</div>
+                    <div style={{ fontWeight: 700, color: '#22c55e', marginBottom: 4 }}>✅ Complaint Filed & AI Processed!</div>
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                      Your ticket ID: <strong style={{ color: 'var(--accent-blue-light)' }}>{complaints[0]?.id}</strong>
+                      Your ticket ID: <strong style={{ color: 'var(--accent-blue-light)' }}>{lastTicket}</strong>
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginTop: 4 }}>You will receive SMS updates on your registered phone.</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginTop: 4 }}>
+                      AI auto-classified, priority-scored, and sentiments analyzed.
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* Right Panel - How It Works */}
+              {/* Right Panel */}
               <div>
                 <div className="glass-card" style={{ padding: 24, marginBottom: 16 }}>
                   <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>How It Works</h3>
@@ -219,25 +275,49 @@ export default function CitizenPortal() {
               <div className="glass-card" style={{ padding: 32, marginBottom: 24 }}>
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16 }}>🔍 Track Your Complaint</h3>
                 <div style={{ display: 'flex', gap: 12 }}>
-                  <input className="form-input" value={trackingId} onChange={e => setTrackingId(e.target.value)} placeholder="Enter Ticket ID (e.g., TKT-4521)" />
-                  <button className="btn btn-primary">Search</button>
+                  <input className="form-input" value={trackingId} onChange={e => setTrackingId(e.target.value)}
+                    placeholder="Enter Ticket ID (e.g., TKT-A1B2C3)" onKeyDown={e => e.key === 'Enter' && handleTrack()} />
+                  <button className="btn btn-primary" onClick={handleTrack}>Search</button>
                 </div>
 
-                {trackedComplaint && (
+                {trackError && (
+                  <div style={{ marginTop: 12, color: '#dc2626', fontSize: '0.85rem' }}>❌ {trackError}</div>
+                )}
+
+                {trackedResult && (
                   <div style={{ marginTop: 24, animation: 'fadeInUp 0.3s ease' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                       <div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>{trackedComplaint.id}</div>
-                        <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{trackedComplaint.title}</div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--accent-blue-light)', fontWeight: 600 }}>{trackedResult.ticket_id}</div>
+                        <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{trackedResult.title}</div>
                       </div>
-                      <span className={`badge badge-${trackedComplaint.priority.toLowerCase()}`}>{trackedComplaint.priority}</span>
+                      <span className={`badge badge-${trackedResult.priority?.toLowerCase()}`}>{trackedResult.priority}</span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                      <div style={{ background: 'var(--bg-tertiary)', borderRadius: 8, padding: 12 }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>Category</div>
+                        <div style={{ fontWeight: 600 }}>{trackedResult.category}</div>
+                      </div>
+                      <div style={{ background: 'var(--bg-tertiary)', borderRadius: 8, padding: 12 }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>Ward</div>
+                        <div style={{ fontWeight: 600 }}>{trackedResult.ward}</div>
+                      </div>
+                      <div style={{ background: 'var(--bg-tertiary)', borderRadius: 8, padding: 12 }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>AI Score</div>
+                        <div style={{ fontWeight: 600, color: 'var(--accent-blue-light)' }}>{trackedResult.ai_score}/100</div>
+                      </div>
+                      <div style={{ background: 'var(--bg-tertiary)', borderRadius: 8, padding: 12 }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>Status</div>
+                        <div style={{ fontWeight: 600, textTransform: 'capitalize' }}>{trackedResult.status?.replace('_', ' ')}</div>
+                      </div>
                     </div>
 
                     {/* Status Timeline */}
                     <div style={{ display: 'flex', gap: 0, marginBottom: 24 }}>
                       {Object.entries(STATUS_CONFIG).map(([key, config], i) => {
                         const statuses = Object.keys(STATUS_CONFIG);
-                        const currentIdx = statuses.indexOf(trackedComplaint.status);
+                        const currentIdx = statuses.indexOf(trackedResult.status);
                         const isComplete = i <= currentIdx;
                         const isActive = i === currentIdx;
                         return (
@@ -254,6 +334,7 @@ export default function CitizenPortal() {
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
                               fontSize: '0.8rem', position: 'relative', zIndex: 1,
                               boxShadow: isActive ? `0 0 16px ${config.color}44` : 'none',
+                              color: isComplete ? 'white' : 'var(--text-tertiary)',
                             }}>
                               {isComplete ? '✓' : (i + 1)}
                             </div>
@@ -262,30 +343,20 @@ export default function CitizenPortal() {
                         );
                       })}
                     </div>
-
-                    {/* Rating */}
-                    {trackedComplaint.status === 'resolved' && (
-                      <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 20, textAlign: 'center' }}>
-                        <div style={{ fontWeight: 700, marginBottom: 8 }}>Rate the Resolution</div>
-                        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
-                          {[1, 2, 3, 4, 5].map(star => (
-                            <span key={star} onClick={() => setRating(star)} style={{
-                              fontSize: '2rem', cursor: 'pointer',
-                              color: star <= rating ? '#f59e0b' : 'var(--text-tertiary)',
-                              transition: 'transform 0.2s',
-                            }}>⭐</span>
-                          ))}
-                        </div>
-                        {rating > 0 && <div style={{ color: '#22c55e', fontSize: '0.85rem' }}>Thank you for your feedback!</div>}
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
 
-              {/* Recent Complaints */}
+              {/* Recent Complaints from Backend */}
               <div className="glass-card" style={{ padding: 24 }}>
-                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>Your Complaints</h3>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>
+                  Recent Complaints {complaints.length > 0 && <span style={{ fontWeight: 400, color: 'var(--text-tertiary)' }}>({complaints.length})</span>}
+                </h3>
+                {complaints.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-tertiary)' }}>
+                    No complaints yet. File one above!
+                  </div>
+                )}
                 {complaints.map(c => {
                   const sConfig = STATUS_CONFIG[c.status as keyof typeof STATUS_CONFIG];
                   return (
@@ -293,9 +364,14 @@ export default function CitizenPortal() {
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                       padding: '12px 0', borderBottom: '1px solid var(--border-subtle)',
                     }}>
-                      <div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--accent-blue-light)', fontWeight: 600 }}>{c.id}</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--accent-blue-light)', fontWeight: 600 }}>{c.id || c.ticket_id}</span>
+                          <span className={`badge badge-${c.priority?.toLowerCase()}`} style={{ fontSize: '0.65rem', padding: '2px 6px' }}>{c.priority}</span>
+                          {c.ai_score > 0 && <span style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)' }}>AI: {c.ai_score}</span>}
+                        </div>
                         <div style={{ fontSize: '0.9rem' }}>{c.title}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>{c.category} · {c.ward}</div>
                       </div>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ width: 6, height: 6, borderRadius: '50%', background: sConfig?.color || '#64748b' }} />

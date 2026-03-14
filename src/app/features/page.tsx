@@ -38,6 +38,13 @@ const features = [
     gradient: 'linear-gradient(135deg, #06b6d4, #3b82f6)',
     stats: ['Auto weekly reports', 'SMS citizen updates', 'Multi-language support'],
   },
+  {
+    num: '09', icon: '📱', title: 'WhatsApp Complaint Bot',
+    desc: 'Citizens file complaints, send photos, record voice notes, and track status — all through WhatsApp. No app download needed.',
+    href: '/features/whatsapp',
+    gradient: 'linear-gradient(135deg, #25D366, #128C7E)',
+    stats: ['Photo AI detection', 'Voice transcription', '12+ languages', 'Live status tracking'],
+  },
 ];
 
 export default function FeaturesPage() {

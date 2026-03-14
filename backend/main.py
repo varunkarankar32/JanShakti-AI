@@ -33,7 +33,7 @@ app.add_middleware(
 )
 
 # Import and register routers
-from routers import complaints, nlp, priority, sentiment, vision, speech, reports, dashboard
+from routers import complaints, nlp, priority, sentiment, vision, speech, reports, dashboard, whatsapp
 
 app.include_router(complaints.router, prefix=API_PREFIX)
 app.include_router(nlp.router, prefix=API_PREFIX)
@@ -43,6 +43,7 @@ app.include_router(vision.router, prefix=API_PREFIX)
 app.include_router(speech.router, prefix=API_PREFIX)
 app.include_router(reports.router, prefix=API_PREFIX)
 app.include_router(dashboard.router, prefix=API_PREFIX)
+app.include_router(whatsapp.router, prefix=API_PREFIX)
 
 
 @app.on_event("startup")
@@ -72,6 +73,8 @@ def root():
             "speech_transcribe": f"{API_PREFIX}/speech/transcribe",
             "report_generate": f"{API_PREFIX}/reports/generate",
             "dashboard_stats": f"{API_PREFIX}/dashboard/stats",
+            "whatsapp_webhook": f"{API_PREFIX}/whatsapp/webhook",
+            "whatsapp_test": f"{API_PREFIX}/whatsapp/test",
         },
     }
 
