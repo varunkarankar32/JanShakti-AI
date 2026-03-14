@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { CATEGORIES, WARDS, STATUS_CONFIG } from '@/lib/mockData';
-import { getBackendBaseUrl } from '@/lib/apiBase';
 
 interface SubmittedComplaint {
   id: string;
@@ -66,7 +65,7 @@ function isTokenExpired(token: string): boolean {
 }
 
 export default function CitizenPortal() {
-  const API_BASE = getBackendBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL);
+  const API_BASE = '';
 
   const [tab, setTab] = useState<'file' | 'track'>('file');
   const [contactPhone, setContactPhone] = useState('');

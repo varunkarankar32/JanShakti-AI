@@ -4,9 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { MapPin, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
 import { mockTrendData, mockAlerts, mockActionQueue, mockWardHeatData, mockCategoryDistribution, STATUS_CONFIG } from '@/lib/mockData';
-import { getBackendBaseUrl } from '@/lib/apiBase';
 
-const API_BASE = getBackendBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL);
+const API_BASE = '';
 
 interface LiveComplaint {
   id: number;
