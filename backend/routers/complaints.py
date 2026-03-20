@@ -5,9 +5,12 @@ Complaints Router — CRUD and workflow operations for citizen complaints.
 from datetime import datetime
 from typing import Optional
 import json
+import smtplib
 import uuid
+from email.message import EmailMessage
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -17,15 +20,17 @@ from models.complaint import Complaint, ComplaintActivity, ComplaintStatus, Prio
 from models.schemas import ComplaintCreate, ComplaintUpdate, ComplaintResponse
 from models.user import User
 from routers.auth import get_current_user, get_current_leader
-from services.nlp_service import nlp_service
 from services.priority_engine import priority_engine
 from services.sentiment_service import sentiment_service
+from services.complaint_extraction_service import complaint_extraction_service
+from config import SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_EMAIL, SMTP_USE_TLS
 
 router = APIRouter(prefix="/complaints", tags=["Complaints"])
 
 
 class LeaderAssignRequest(BaseModel):
     authority_name: str
+    authority_email: Optional[str] = None
     assigned_team: Optional[str] = None
     leader_note: Optional[str] = None
 
@@ -44,6 +49,19 @@ class LeaderStatusRequest(BaseModel):
 class LeaderResolveRequest(BaseModel):
     resolution_note: str
     citizen_update: Optional[str] = None
+
+
+class LeaderAuthorityMailRequest(BaseModel):
+    authority_name: str
+    authority_email: str
+    subject: Optional[str] = None
+    message: Optional[str] = None
+
+
+class ComplaintTextExtractRequest(BaseModel):
+    text: str
+    ward: Optional[str] = None
+    category: Optional[str] = None
 
 
 def _log_activity(
@@ -91,6 +109,31 @@ def _parse_status(status_text: str) -> ComplaintStatus:
         raise HTTPException(status_code=400, detail="Invalid status value")
 
 
+def _dispatch_mail(to_email: str, subject: str, body: str):
+    # Use SMTP when configured; otherwise return a mailto fallback for local/dev use.
+    if not SMTP_HOST or not SMTP_FROM_EMAIL:
+        return {
+            "delivered": False,
+            "mode": "mailto_fallback",
+            "mailto_url": f"mailto:{to_email}?subject={quote(subject)}&body={quote(body)}",
+        }
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM_EMAIL
+    msg["To"] = to_email
+    msg.set_content(body)
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as smtp:
+        if SMTP_USE_TLS:
+            smtp.starttls()
+        if SMTP_USERNAME and SMTP_PASSWORD:
+            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+        smtp.send_message(msg)
+
+    return {"delivered": True, "mode": "smtp"}
+
+
 @router.post("", response_model=ComplaintResponse)
 def create_complaint(
     complaint: ComplaintCreate,
@@ -100,18 +143,28 @@ def create_complaint(
     """Create a new complaint with AI auto-classification and priority scoring."""
     ticket_id = f"TKT-{uuid.uuid4().hex[:6].upper()}"
 
-    ai_category, _ = nlp_service.classify(complaint.description)
-    entities = nlp_service.extract_entities(complaint.description)
+    try:
+        extracted = complaint_extraction_service.extract_from_text(
+            text=complaint.description,
+            ward_hint=complaint.ward,
+            category_hint=complaint.category,
+            source=complaint.input_mode if complaint.input_mode else "text",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
-    category = complaint.category if complaint.category else ai_category
+    refined_description = extracted["description"]
+    category = complaint.category if complaint.category else extracted["category"]
+    ai_meta = extracted.get("ai", {})
+
     priority_result = priority_engine.calculate_score(
-        text=complaint.description,
+        text=refined_description,
         category=category,
         ward=complaint.ward,
         recurrence_count=0,
         social_mentions=0,
     )
-    _ = sentiment_service.analyze(complaint.description)
+    _ = sentiment_service.analyze(refined_description)
 
     priority_level = PriorityLevel(priority_result["priority"])
     input_mode = InputMode(complaint.input_mode) if complaint.input_mode in [e.value for e in InputMode] else InputMode.TEXT
@@ -119,10 +172,10 @@ def create_complaint(
     db_complaint = Complaint(
         ticket_id=ticket_id,
         title=complaint.title,
-        description=complaint.description,
+        description=refined_description,
         category=category,
         ward=complaint.ward,
-        location=complaint.location or entities.get("location", ""),
+        location=complaint.location or extracted.get("location", ""),
         latitude=complaint.latitude,
         longitude=complaint.longitude,
         citizen_user_id=current_user.id,
@@ -134,8 +187,8 @@ def create_complaint(
         impact_score=priority_result["impact"],
         recurrence_score=priority_result["recurrence"],
         sentiment_score=priority_result["sentiment"],
-        ai_category=ai_category,
-        ai_entities=json.dumps(entities),
+        ai_category=ai_meta.get("category"),
+        ai_entities=json.dumps(ai_meta),
         status=ComplaintStatus.OPEN,
         input_mode=input_mode,
         citizen_update="Complaint received and queued for leader review.",
@@ -154,6 +207,53 @@ def create_complaint(
     db.commit()
     db.refresh(db_complaint)
     return db_complaint
+
+
+@router.post("/extract/text")
+def extract_complaint_text(request: ComplaintTextExtractRequest):
+    """Extract structured complaint details from free-form text."""
+    try:
+        return complaint_extraction_service.extract_from_text(
+            text=request.text,
+            ward_hint=request.ward,
+            category_hint=request.category,
+            source="text",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/extract/image")
+async def extract_complaint_image(
+    image: UploadFile = File(...),
+    caption: str = Form(""),
+    ward: Optional[str] = Form(None),
+):
+    """Extract structured complaint details from an issue photo."""
+    image_bytes = await image.read()
+    return complaint_extraction_service.extract_from_image(
+        image_bytes=image_bytes,
+        caption=caption or None,
+        ward_hint=ward,
+    )
+
+
+@router.post("/extract/voice")
+async def extract_complaint_voice(
+    audio: UploadFile = File(...),
+    ward: Optional[str] = Form(None),
+):
+    """Transcribe voice input and convert it into a complaint statement."""
+    audio_bytes = await audio.read()
+    ext = audio.filename.split(".")[-1] if audio.filename and "." in audio.filename else "ogg"
+    try:
+        return complaint_extraction_service.extract_from_voice(
+            audio_bytes=audio_bytes,
+            file_extension=ext,
+            ward_hint=ward,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("")
@@ -197,6 +297,9 @@ def list_complaints(
                 "input_mode": c.input_mode.value if c.input_mode else "text",
                 "assigned_to": c.assigned_to,
                 "assigned_authority": c.assigned_authority,
+                "authority_email": c.authority_email,
+                "authority_response": c.authority_response,
+                "leader_note": c.leader_note,
                 "citizen_update": c.citizen_update,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
                 "rating": c.rating,
@@ -232,6 +335,7 @@ def list_my_complaints(
                 "priority": c.priority.value if c.priority else "P3",
                 "status": c.status.value if c.status else "open",
                 "assigned_authority": c.assigned_authority,
+                "authority_email": c.authority_email,
                 "authority_response": c.authority_response,
                 "citizen_update": c.citizen_update,
                 "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
@@ -269,6 +373,7 @@ def get_complaint(ticket_id: str, db: Session = Depends(get_db)):
         "input_mode": complaint.input_mode.value,
         "assigned_to": complaint.assigned_to,
         "assigned_authority": complaint.assigned_authority,
+        "authority_email": complaint.authority_email,
         "leader_note": complaint.leader_note,
         "authority_response": complaint.authority_response,
         "citizen_update": complaint.citizen_update,
@@ -319,6 +424,7 @@ def leader_assign_authority(
         raise HTTPException(status_code=404, detail="Complaint not found")
 
     complaint.assigned_authority = req.authority_name.strip()
+    complaint.authority_email = req.authority_email.strip() if req.authority_email else complaint.authority_email
     if req.assigned_team:
         complaint.assigned_to = req.assigned_team.strip()
     complaint.leader_note = req.leader_note or complaint.leader_note
@@ -340,6 +446,7 @@ def leader_assign_authority(
         "ticket_id": complaint.ticket_id,
         "status": complaint.status.value,
         "assigned_authority": complaint.assigned_authority,
+        "authority_email": complaint.authority_email,
         "assigned_to": complaint.assigned_to,
         "citizen_update": complaint.citizen_update,
     }
@@ -382,6 +489,63 @@ def authority_respond(
         "status": complaint.status.value,
         "authority_response": complaint.authority_response,
         "citizen_update": complaint.citizen_update,
+    }
+
+
+@router.post("/{ticket_id}/leader/mail-authority")
+def leader_mail_authority(
+    ticket_id: str,
+    req: LeaderAuthorityMailRequest,
+    db: Session = Depends(get_db),
+    current_leader: User = Depends(get_current_leader),
+):
+    """Leader sends complaint context to authority via SMTP/mailto fallback."""
+    complaint = db.query(Complaint).filter(Complaint.ticket_id == ticket_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    authority_name = req.authority_name.strip()
+    authority_email = req.authority_email.strip().lower()
+    if not authority_name or not authority_email:
+        raise HTTPException(status_code=400, detail="Authority name and email are required")
+
+    complaint.assigned_authority = authority_name
+    complaint.authority_email = authority_email
+
+    subject = req.subject or f"Action Required: {complaint.ticket_id} ({complaint.priority.value})"
+    body = req.message or (
+        f"Authority: {authority_name}\n"
+        f"Ticket: {complaint.ticket_id}\n"
+        f"Category: {complaint.category}\n"
+        f"Ward: {complaint.ward}\n"
+        f"Priority: {complaint.priority.value}\n"
+        f"Status: {complaint.status.value}\n\n"
+        f"Issue: {complaint.title}\n"
+        f"Description: {complaint.description}\n\n"
+        f"Leader: {current_leader.name}\n"
+        f"Please acknowledge and share field response."
+    )
+
+    try:
+        mail_result = _dispatch_mail(authority_email, subject, body)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to dispatch email: {exc}")
+
+    _log_activity(
+        db,
+        complaint,
+        actor_role="leader",
+        actor_name=current_leader.name,
+        action="authority_mail_sent",
+        note=f"Mail sent to {authority_name} <{authority_email}> via {mail_result['mode']}",
+    )
+    db.commit()
+
+    return {
+        "ticket_id": complaint.ticket_id,
+        "authority_name": authority_name,
+        "authority_email": authority_email,
+        "delivery": mail_result,
     }
 
 
@@ -442,6 +606,15 @@ def leader_resolve_complaint(
     complaint = db.query(Complaint).filter(Complaint.ticket_id == ticket_id).first()
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
+
+    if complaint.status == ComplaintStatus.RESOLVED:
+        raise HTTPException(status_code=400, detail="Complaint is already resolved")
+
+    if not complaint.assigned_authority:
+        raise HTTPException(status_code=400, detail="Assign complaint to authority before resolving")
+
+    if complaint.status not in (ComplaintStatus.IN_PROGRESS, ComplaintStatus.VERIFICATION, ComplaintStatus.ASSIGNED):
+        raise HTTPException(status_code=400, detail="Complaint must be in assigned/in-progress/verification stage")
 
     complaint.status = ComplaintStatus.RESOLVED
     complaint.resolved_at = datetime.now()

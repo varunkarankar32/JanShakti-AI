@@ -16,7 +16,9 @@ interface LiveComplaint {
   input_mode: string;
   assigned_to: string | null;
   assigned_authority?: string | null;
+  authority_email?: string | null;
   authority_response?: string | null;
+  leader_note?: string | null;
   citizen_update?: string | null;
   created_at: string | null;
   rating: number | null;
@@ -49,7 +51,36 @@ const DEFAULT_KPIS = [
   { label: 'Avg AI Score', value: '0', icon: '🤖', color: '#8b5cf6', change: 'Priority score' },
 ];
 
+function safeStorageGet(key: string): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return window.localStorage.getItem(key) || '';
+  } catch {
+    return '';
+  }
+}
+
+function safeStorageSet(key: string, value: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage write failures in restricted contexts.
+  }
+}
+
+function safeStorageRemove(key: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore storage removal failures in restricted contexts.
+  }
+}
+
 export default function DashboardPage() {
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
+
   const [activeView, setActiveView] = useState('overview');
   const [complaints, setComplaints] = useState<LiveComplaint[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -66,8 +97,11 @@ export default function DashboardPage() {
   const [leaderPassword, setLeaderPassword] = useState('');
   const [selectedTicket, setSelectedTicket] = useState<string>('');
   const [authorityName, setAuthorityName] = useState('');
+  const [authorityEmail, setAuthorityEmail] = useState('');
   const [authorityResponse, setAuthorityResponse] = useState('');
   const [leaderNote, setLeaderNote] = useState('');
+  const [mailSubject, setMailSubject] = useState('');
+  const [mailMessage, setMailMessage] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -76,13 +110,13 @@ export default function DashboardPage() {
     setLeaderUser(null);
     setStats(null);
     setComplaints([]);
-    localStorage.removeItem('leader_token');
-    localStorage.removeItem('leader_user');
+    safeStorageRemove('leader_token');
+    safeStorageRemove('leader_user');
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem('leader_token') || '';
-    const userRaw = localStorage.getItem('leader_user');
+    const token = safeStorageGet('leader_token');
+    const userRaw = safeStorageGet('leader_user');
 
     if (!token || !userRaw) {
       setAuthChecking(false);
@@ -94,8 +128,8 @@ export default function DashboardPage() {
       setLeaderToken(token);
       setLeaderUser(parsed);
     } catch {
-      localStorage.removeItem('leader_token');
-      localStorage.removeItem('leader_user');
+      safeStorageRemove('leader_token');
+      safeStorageRemove('leader_user');
     } finally {
       setAuthChecking(false);
     }
@@ -104,7 +138,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!leaderToken) return;
 
-    fetch('/api/auth/me', {
+    fetch(`${API_BASE}/api/auth/me`, {
       headers: { Authorization: `Bearer ${leaderToken}` },
     })
       .then(async (res) => {
@@ -121,12 +155,12 @@ export default function DashboardPage() {
         }
 
         setLeaderUser(user);
-        localStorage.setItem('leader_user', JSON.stringify(user));
+        safeStorageSet('leader_user', JSON.stringify(user));
       })
       .catch(() => {
         handleLeaderLogout();
       });
-  }, [leaderToken, handleLeaderLogout]);
+  }, [leaderToken, handleLeaderLogout, API_BASE]);
 
   useEffect(() => {
     if (!lastUpdated) {
@@ -150,8 +184,8 @@ export default function DashboardPage() {
     try {
       const headers = { Authorization: `Bearer ${leaderToken}` };
       const [complaintsRes, statsRes] = await Promise.all([
-        fetch('/api/complaints/?limit=50', { headers }),
-        fetch('/api/dashboard/stats', { headers }),
+        fetch(`${API_BASE}/api/complaints?limit=50`, { headers }),
+        fetch(`${API_BASE}/api/dashboard/stats`, { headers }),
       ]);
 
       if (statsRes.status === 401 || statsRes.status === 403) {
@@ -177,7 +211,7 @@ export default function DashboardPage() {
     } catch {
       setBackendOnline(false);
     }
-  }, [leaderToken, handleLeaderLogout]);
+  }, [leaderToken, handleLeaderLogout, API_BASE]);
 
   useEffect(() => {
     if (!leaderToken || !leaderUser) return;
@@ -192,7 +226,7 @@ export default function DashboardPage() {
     setAuthError('');
 
     try {
-      const res = await fetch('/api/auth/leader/login', {
+      const res = await fetch(`${API_BASE}/api/auth/leader/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: leaderEmail.trim(), password: leaderPassword }),
@@ -206,8 +240,8 @@ export default function DashboardPage() {
 
       setLeaderToken(data.token);
       setLeaderUser(data.user);
-      localStorage.setItem('leader_token', data.token);
-      localStorage.setItem('leader_user', JSON.stringify(data.user));
+      safeStorageSet('leader_token', data.token);
+      safeStorageSet('leader_user', JSON.stringify(data.user));
       setLeaderPassword('');
     } catch {
       setAuthError('Cannot connect to auth service.');
@@ -231,7 +265,7 @@ export default function DashboardPage() {
     setActionMessage('');
 
     try {
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -246,7 +280,12 @@ export default function DashboardPage() {
         return;
       }
 
-      setActionMessage(successMessage);
+      const payload = await res.json().catch(() => null);
+      if (payload?.delivery?.mode === 'mailto_fallback' && payload?.delivery?.mailto_url) {
+        setActionMessage(`${successMessage} | Open: ${payload.delivery.mailto_url}`);
+      } else {
+        setActionMessage(successMessage);
+      }
       await fetchData();
     } catch {
       setActionMessage('✕ Unable to update workflow right now.');
@@ -390,7 +429,7 @@ export default function DashboardPage() {
                 🏛️ Leader&apos;s Command Dashboard
               </h1>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                {backendOnline ? 'Live data from AI backend — auto-refreshes every 15 seconds' : '⚠️ Backend offline — start it with: uvicorn main:app --port 8000'}
+                {backendOnline ? 'Live data from AI backend — auto-refreshes every 15 seconds' : '⚠️ Backend offline — start it with: uvicorn main:app --port 8010'}
               </p>
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -627,8 +666,11 @@ export default function DashboardPage() {
                                 onClick={() => {
                                   setSelectedTicket(c.ticket_id);
                                   setAuthorityName(c.assigned_authority || '');
-                                  setLeaderNote('');
+                                  setAuthorityEmail(c.authority_email || '');
+                                  setLeaderNote(c.leader_note || '');
                                   setAuthorityResponse(c.authority_response || '');
+                                  setMailSubject(`Action Required: ${c.ticket_id} (${c.priority})`);
+                                  setMailMessage(`Please take action on ticket ${c.ticket_id} (${c.category}, ${c.ward}).\n\nIssue: ${c.title}`);
                                   setActionMessage('');
                                 }}
                               >
@@ -653,12 +695,18 @@ export default function DashboardPage() {
                     <span className={`badge badge-${selectedComplaint.priority?.toLowerCase()}`}>{selectedComplaint.priority}</span>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginBottom: 10 }}>
                     <input
                       className="form-input"
                       value={authorityName}
                       onChange={(e) => setAuthorityName(e.target.value)}
                       placeholder="Authority (e.g., Water Dept.)"
+                    />
+                    <input
+                      className="form-input"
+                      value={authorityEmail}
+                      onChange={(e) => setAuthorityEmail(e.target.value)}
+                      placeholder="Authority email (dept@example.gov.in)"
                     />
                     <input
                       className="form-input"
@@ -676,6 +724,21 @@ export default function DashboardPage() {
                     style={{ marginBottom: 10 }}
                   />
 
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <input
+                      className="form-input"
+                      value={mailSubject}
+                      onChange={(e) => setMailSubject(e.target.value)}
+                      placeholder="Mail subject"
+                    />
+                    <input
+                      className="form-input"
+                      value={mailMessage}
+                      onChange={(e) => setMailMessage(e.target.value)}
+                      placeholder="Mail message summary"
+                    />
+                  </div>
+
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     <button
                       className="btn btn-primary"
@@ -684,12 +747,28 @@ export default function DashboardPage() {
                         `/api/complaints/${selectedComplaint.ticket_id}/leader/assign`,
                         {
                           authority_name: authorityName || 'Concerned Authority',
+                          authority_email: authorityEmail || null,
                           assigned_team: selectedComplaint.assigned_to || null,
                           leader_note: leaderNote || null,
                         },
                         '✓ Assigned to authority'
                       )}
                     >Assign</button>
+
+                    <button
+                      className="btn btn-secondary"
+                      disabled={actionLoading || !authorityName || !authorityEmail}
+                      onClick={() => runLeaderAction(
+                        `/api/complaints/${selectedComplaint.ticket_id}/leader/mail-authority`,
+                        {
+                          authority_name: authorityName,
+                          authority_email: authorityEmail,
+                          subject: mailSubject || null,
+                          message: mailMessage || null,
+                        },
+                        '✓ Authority mail dispatched (or mailto prepared)'
+                      )}
+                    >Mail Authority</button>
 
                     <button
                       className="btn btn-secondary"
@@ -709,11 +788,25 @@ export default function DashboardPage() {
                         {
                           authority_name: authorityName || 'Concerned Authority',
                           response: authorityResponse || 'Field team submitted update.',
-                          mark_verification_ready: true,
+                          mark_verification_ready: false,
                         },
                         '✓ Authority response recorded'
                       )}
-                    >Authority Response</button>
+                    >Save Response</button>
+
+                    <button
+                      className="btn btn-secondary"
+                      disabled={actionLoading}
+                      onClick={() => runLeaderAction(
+                        `/api/complaints/${selectedComplaint.ticket_id}/authority/respond`,
+                        {
+                          authority_name: authorityName || 'Concerned Authority',
+                          response: authorityResponse || 'Work completed by authority.',
+                          mark_verification_ready: true,
+                        },
+                        '✓ Sent to verification queue'
+                      )}
+                    >Ready for Verification</button>
 
                     <button
                       className="btn btn-secondary"
@@ -737,6 +830,16 @@ export default function DashboardPage() {
                         '✓ Marked as solved and notified'
                       )}
                     >Mark Solved</button>
+
+                    <button
+                      className="btn btn-secondary"
+                      disabled={actionLoading}
+                      onClick={() => runLeaderAction(
+                        `/api/complaints/${selectedComplaint.ticket_id}/leader/status`,
+                        { status: 'open', leader_note: leaderNote || 'Reopened by leader for additional work.' },
+                        '✓ Complaint reopened for additional action'
+                      )}
+                    >Reopen</button>
                   </div>
 
                   {(selectedComplaint.citizen_update || actionMessage) && (

@@ -58,6 +58,7 @@ class Complaint(Base):
     input_mode = Column(SqlEnum(InputMode), default=InputMode.TEXT)
     assigned_to = Column(String, nullable=True)
     assigned_authority = Column(String, nullable=True)
+    authority_email = Column(String, nullable=True)
     leader_note = Column(Text, nullable=True)
     authority_response = Column(Text, nullable=True)
     citizen_update = Column(Text, nullable=True)

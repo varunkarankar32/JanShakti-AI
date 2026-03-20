@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { CATEGORIES, WARDS, STATUS_CONFIG } from '@/lib/mockData';
 
 interface SubmittedComplaint {
@@ -51,6 +51,17 @@ interface MyComplaint {
   created_at?: string;
 }
 
+type BrowserSpeechRecognition = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  start: () => void;
+  stop: () => void;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+
 function isTokenExpired(token: string): boolean {
   try {
     const base64Url = token.split('.')[1];
@@ -64,8 +75,35 @@ function isTokenExpired(token: string): boolean {
   }
 }
 
+function safeStorageGet(key: string): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return window.localStorage.getItem(key) || '';
+  } catch {
+    return '';
+  }
+}
+
+function safeStorageSet(key: string, value: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage write failures in restricted contexts.
+  }
+}
+
+function safeStorageRemove(key: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore storage removal failures in restricted contexts.
+  }
+}
+
 export default function CitizenPortal() {
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
 
   const [tab, setTab] = useState<'file' | 'track'>('file');
   const [contactPhone, setContactPhone] = useState('');
@@ -73,7 +111,11 @@ export default function CitizenPortal() {
   const [ward, setWard] = useState('');
   const [description, setDescription] = useState('');
   const [inputMode, setInputMode] = useState<'text' | 'voice' | 'photo'>('text');
-  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceLanguage, setVoiceLanguage] = useState('');
+  const [liveSpeechSupported, setLiveSpeechSupported] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceTranscribeError, setVoiceTranscribeError] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -95,10 +137,27 @@ export default function CitizenPortal() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('citizen_token') || '';
-    const userRaw = localStorage.getItem('citizen_user');
+    if (typeof window === 'undefined') return;
+    const w = window as Window & {
+      webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+      SpeechRecognition?: new () => BrowserSpeechRecognition;
+    };
+    setLiveSpeechSupported(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const token = safeStorageGet('citizen_token');
+    const userRaw = safeStorageGet('citizen_user');
     if (token && userRaw) {
       if (!isTokenExpired(token)) {
         try {
@@ -107,13 +166,13 @@ export default function CitizenPortal() {
           setAuthUser(parsedUser);
           setContactPhone(parsedUser.phone || '');
         } catch {
-          localStorage.removeItem('citizen_token');
-          localStorage.removeItem('citizen_user');
+          safeStorageRemove('citizen_token');
+          safeStorageRemove('citizen_user');
         }
       } else {
         // Token expired — clear storage and show login form
-        localStorage.removeItem('citizen_token');
-        localStorage.removeItem('citizen_user');
+        safeStorageRemove('citizen_token');
+        safeStorageRemove('citizen_user');
         setAuthMode('login');
       }
     }
@@ -122,7 +181,7 @@ export default function CitizenPortal() {
   useEffect(() => {
     if (!authToken) return;
 
-    fetch('/api/auth/me', {
+    fetch(`${API_BASE}/api/auth/me`, {
       headers: { Authorization: `Bearer ${authToken}`, 'Cache-Control': 'no-cache' },
     })
       .then(async (res) => {
@@ -134,7 +193,7 @@ export default function CitizenPortal() {
       .catch(() => {
         // Network error (backend temporarily down) — do NOT log out
       });
-  }, [authToken]);
+  }, [authToken, API_BASE]);
 
   useEffect(() => {
     if (!authToken) {
@@ -158,11 +217,11 @@ export default function CitizenPortal() {
       .catch(() => {
         // Keep existing UI state on temporary network failures.
       });
-  }, [authToken, submitted]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authToken, submitted, API_BASE]);
 
   // Check backend health + load complaints
   useEffect(() => {
-    fetch('/api/complaints/?limit=20')
+    fetch(`${API_BASE}/api/complaints?limit=20`)
       .then(r => r.json())
       .then((data: { complaints?: Array<Partial<SubmittedComplaint>> }) => {
         setBackendOnline(true);
@@ -182,14 +241,14 @@ export default function CitizenPortal() {
         }
       })
       .catch(() => setBackendOnline(false));
-  }, [submitted]);
+  }, [submitted, API_BASE]);
 
   const persistAuth = (token: string, user: AuthUser) => {
     setAuthToken(token);
     setAuthUser(user);
     setContactPhone(user.phone || '');
-    localStorage.setItem('citizen_token', token);
-    localStorage.setItem('citizen_user', JSON.stringify(user));
+    safeStorageSet('citizen_token', token);
+    safeStorageSet('citizen_user', JSON.stringify(user));
   };
 
   const handleLogout = () => {
@@ -198,8 +257,8 @@ export default function CitizenPortal() {
     setMyComplaints([]);
     setTrackedResult(null);
     setAuthMode('login');
-    localStorage.removeItem('citizen_token');
-    localStorage.removeItem('citizen_user');
+    safeStorageRemove('citizen_token');
+    safeStorageRemove('citizen_user');
   };
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
@@ -208,7 +267,7 @@ export default function CitizenPortal() {
     setAuthError('');
 
     try {
-      const endpoint = authMode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
+      const endpoint = authMode === 'signup' ? `${API_BASE}/api/auth/signup` : `${API_BASE}/api/auth/login`;
       const payload = authMode === 'signup'
         ? { name: authName.trim(), email: authEmail.trim(), phone: authPhone.trim() || null, password: authPassword }
         : { email: authEmail.trim(), password: authPassword };
@@ -246,12 +305,65 @@ export default function CitizenPortal() {
     }
   };
 
+  const startLiveDictation = () => {
+    if (typeof window === 'undefined') return;
+    const w = window as Window & {
+      webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+      SpeechRecognition?: new () => BrowserSpeechRecognition;
+    };
+    const SpeechRecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setVoiceTranscribeError('Live dictation is not supported in this browser.');
+      return;
+    }
+
+    setVoiceTranscribeError('');
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = 'en-IN';
+    recognition.interimResults = true;
+    recognition.continuous = true;
+
+    recognition.onresult = (event) => {
+      let transcript = '';
+      for (let i = 0; i < event.results.length; i += 1) {
+        transcript += `${event.results[i][0].transcript} `;
+      }
+      const normalized = transcript.trim();
+      setVoiceTranscript(normalized);
+      setVoiceLanguage('Live Mic');
+    };
+
+    recognition.onerror = (event) => {
+      const err = event?.error || 'unknown';
+      setVoiceTranscribeError(`Live transcription error: ${err}`);
+    };
+
+    recognition.onend = () => {
+      setVoiceListening(false);
+      if (!description.trim() && voiceTranscript.trim()) {
+        setDescription(voiceTranscript.trim());
+      }
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setVoiceListening(true);
+  };
+
+  const stopLiveDictation = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    setVoiceListening(false);
+  };
+
   // Submit complaint to real backend
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Read token fresh from localStorage to avoid React stale closure issues
-    const currentToken = authToken || localStorage.getItem('citizen_token') || '';
+    // Read token fresh from local storage to avoid React stale closure issues.
+    const currentToken = authToken || safeStorageGet('citizen_token');
     const currentUser = authUser;
 
     if (!currentToken || !currentUser) {
@@ -275,22 +387,17 @@ export default function CitizenPortal() {
       let finalCategory = category;
 
       if (inputMode === 'voice') {
-        if (!audioFile) {
-          alert('Please upload or record an audio file for voice mode.');
+        let transcriptText = voiceTranscript.trim();
+        if (!transcriptText && !finalDescription) {
+          alert('Please use live mic dictation, or type details in additional details.');
           return;
         }
-        const audioData = new FormData();
-        audioData.append('audio', audioFile);
 
-        const transcribeRes = await fetch('/api/speech/transcribe', {
-          method: 'POST',
-          body: audioData,
-        });
-        if (!transcribeRes.ok) {
-          throw new Error(await parseErrorMessage(transcribeRes));
+        if (!finalDescription) {
+          finalDescription = transcriptText;
+        } else if (transcriptText && finalDescription !== transcriptText) {
+          finalDescription = `${transcriptText}\n\nAdditional details: ${finalDescription}`;
         }
-        const transcription = await transcribeRes.json();
-        finalDescription = transcription?.text?.trim() || finalDescription;
       }
 
       if (inputMode === 'photo') {
@@ -298,22 +405,30 @@ export default function CitizenPortal() {
           alert('Please upload a photo for photo mode.');
           return;
         }
+
         const imageData = new FormData();
         imageData.append('image', photoFile);
+        imageData.append('ward', ward || 'Ward 1');
 
-        const detectRes = await fetch('/api/vision/detect', {
+        const detectRes = await fetch(`${API_BASE}/api/complaints/extract/image`, {
           method: 'POST',
           body: imageData,
         });
+
         if (!detectRes.ok) {
           throw new Error(await parseErrorMessage(detectRes));
         }
+
         const detection = await detectRes.json();
         if (!finalCategory && detection?.category) {
           finalCategory = String(detection.category);
         }
+
         if (!finalDescription) {
-          finalDescription = `Photo report: ${detection?.category || 'issue'} detected with ${detection?.severity || 'unknown'} severity.`;
+          finalDescription = String(
+            detection?.description
+              || `Photo report: ${detection?.category || 'infrastructure issue'} detected.`
+          ).trim();
         }
       }
 
@@ -352,7 +467,10 @@ export default function CitizenPortal() {
         setDescription('');
         setCategory('');
         setWard('');
-        setAudioFile(null);
+        setVoiceTranscript('');
+        setVoiceLanguage('');
+        setVoiceListening(false);
+        setVoiceTranscribeError('');
         setPhotoFile(null);
       } else {
         const detail = await parseErrorMessage(res);
@@ -379,7 +497,7 @@ export default function CitizenPortal() {
     setTrackedResult(null);
 
     try {
-      const res = await fetch(`/api/complaints/${trackingId.trim().toUpperCase()}`);
+      const res = await fetch(`${API_BASE}/api/complaints/${trackingId.trim().toUpperCase()}`);
       if (res.ok) {
         const data = await res.json();
         setTrackedResult(data);
@@ -411,7 +529,7 @@ export default function CitizenPortal() {
             color: backendOnline ? '#16a34a' : '#dc2626',
           }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: backendOnline ? '#22c55e' : '#ef4444' }} />
-            {backendOnline ? 'AI Backend Connected' : 'Backend Offline — Start with: uvicorn main:app --port 8000'}
+            {backendOnline ? 'AI Backend Connected' : 'Backend Offline — Start with: uvicorn main:app --port 8010'}
           </div>
 
           {/* Tab Switcher */}
@@ -536,7 +654,10 @@ export default function CitizenPortal() {
                           key={mode.key}
                           onClick={() => {
                             setInputMode(mode.key);
-                            setAudioFile(null);
+                            setVoiceTranscript('');
+                            setVoiceLanguage('');
+                            setVoiceListening(false);
+                            setVoiceTranscribeError('');
                             setPhotoFile(null);
                           }}
                           style={{
@@ -582,17 +703,70 @@ export default function CitizenPortal() {
 
                       {inputMode === 'voice' && (
                         <div className="form-group">
-                          <label className="form-label">Upload Voice Recording</label>
-                          <input
-                            type="file"
-                            accept="audio/*"
-                            capture="user"
-                            onChange={e => setAudioFile(e.target.files?.[0] || null)}
-                            required
-                            style={{ width: '100%' }}
-                          />
+                          <label className="form-label">Live Voice Input</label>
+                          <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              disabled={!liveSpeechSupported || inputProcessing || submitting}
+                              onClick={() => {
+                                if (voiceListening) {
+                                  stopLiveDictation();
+                                } else {
+                                  startLiveDictation();
+                                }
+                              }}
+                            >
+                              {voiceListening ? '⏹️ Stop Live Mic' : '🎙️ Start Live Mic'}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              disabled={!voiceTranscript}
+                              onClick={() => {
+                                if (!description.trim()) {
+                                  setDescription(voiceTranscript);
+                                }
+                              }}
+                            >
+                              Use Transcript
+                            </button>
+                          </div>
+
+                          {!liveSpeechSupported && (
+                            <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+                              Live microphone dictation is unavailable in this browser. Use Chrome/Edge for this feature.
+                            </div>
+                          )}
+
+                          {voiceTranscribeError && (
+                            <div style={{ marginTop: 8, color: '#dc2626', fontSize: '0.78rem' }}>
+                              ❌ {voiceTranscribeError}
+                            </div>
+                          )}
+
+                          {voiceTranscript && (
+                            <div style={{ marginTop: 10 }}>
+                              <div style={{ fontSize: '0.76rem', color: 'var(--text-tertiary)', marginBottom: 4 }}>
+                                Transcript {voiceLanguage ? `(${voiceLanguage})` : ''}
+                              </div>
+                              <div style={{
+                                background: 'var(--bg-tertiary)',
+                                border: '1px solid var(--border-subtle)',
+                                borderRadius: 8,
+                                padding: 10,
+                                fontSize: '0.82rem',
+                                color: 'var(--text-secondary)',
+                                whiteSpace: 'pre-wrap',
+                              }}>
+                                {voiceTranscript}
+                              </div>
+                            </div>
+                          )}
+
                           <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: 4 }}>
-                            {audioFile ? `Selected: ${audioFile.name}` : 'Audio will be transcribed automatically before filing.'}
+                            Use Start Live Mic to dictate your complaint, then Stop and submit.
                           </div>
                         </div>
                       )}

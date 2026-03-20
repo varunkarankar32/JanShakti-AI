@@ -6,6 +6,7 @@ Falls back to keyword-based sentiment if model cannot be loaded.
 
 import re
 from typing import Dict, Tuple
+from config import SENTIMENT_MODEL
 
 # Try to load transformers
 try:
@@ -32,7 +33,7 @@ NEGATIVE_WORDS = [
 
 
 class SentimentService:
-    def __init__(self, model_name: str = "distilbert-base-uncased-finetuned-sst-2-english"):
+    def __init__(self, model_name: str = SENTIMENT_MODEL):
         self.model_name = model_name
         self.classifier = None
         self._load_model()
@@ -49,6 +50,14 @@ class SentimentService:
             except Exception as e:
                 print(f"[Sentiment] Cannot load model: {e} — using keyword fallback")
 
+    def _normalize_label(self, label: str) -> str:
+        label_lower = label.lower()
+        if "pos" in label_lower:
+            return "positive"
+        if "neg" in label_lower:
+            return "negative"
+        return "neutral"
+
     def analyze(self, text: str) -> Dict:
         """
         Analyze sentiment of text.
@@ -57,16 +66,11 @@ class SentimentService:
         # Try ML model
         if self.classifier:
             try:
-                result = self.classifier(text[:512])[0]
-                label = result["label"].lower()
+                result = self.classifier(text[:512], truncation=True)[0]
+                label = self._normalize_label(result["label"])
                 confidence = float(result["score"])
 
-                if label == "positive":
-                    sentiment = "positive"
-                elif label == "negative":
-                    sentiment = "negative"
-                else:
-                    sentiment = "neutral"
+                sentiment = label
 
                 return {
                     "sentiment": sentiment,

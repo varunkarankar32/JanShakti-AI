@@ -47,7 +47,7 @@
 ### 1. Frontend Setup (Next.js)
 ```bash
 # Navigate to the project directory
-cd janshakti-ai
+cd JanShakti-AI
 
 # Install dependencies
 npm install
@@ -55,49 +55,97 @@ npm install
 # Start the development server
 npm run dev
 # → Accessible at http://localhost:3000
-2. Backend Setup (FastAPI)
-Bash
+```
+
+### 2. Backend Setup (FastAPI)
+```bash
 # Navigate to the backend directory
 cd backend
 
 # Install Python dependencies
 pip install -r requirements.txt
 
-# Run the FastAPI server
-uvicorn main:app --host 127.0.0.1 --port 8000
-# → Swagger API Docs accessible at http://localhost:8000/docs
-3. Model Training (Optional)
-If you wish to retrain the AI models locally:
+# Required for Whisper audio decoding (Windows/macOS/Linux)
+# Install ffmpeg and ensure it is available in PATH
 
-Bash
+# Run the FastAPI server
+uvicorn main:app --host 127.0.0.1 --port 8010
+# → Swagger API Docs accessible at http://127.0.0.1:8010/docs
+```
+
+### 3. Pretrained Model Bootstrap (Automatic)
+On the first backend run, services automatically download/load pretrained models:
+
+- Sentiment: Hugging Face sentiment model (`distilbert-base-uncased-finetuned-sst-2-english`)
+- NLP Classification: Hugging Face zero-shot model (`typeform/distilbert-base-uncased-mnli`) if local `classifier.pkl` is missing
+- Speech-to-Text: OpenAI Whisper (`base` by default, falls back to `tiny`)
+- Vision: Custom YOLO weights if present, otherwise pretrained `yolov8n.pt`
+
+No manual training is required for inference.
+
+If speech transcription fails (missing ffmpeg or unsupported audio), API now returns an explicit error instead of demo/hardcoded text.
+For demo-only behavior, set `ALLOW_SIMULATED_TRANSCRIPTION=true` in [backend/.env](backend/.env).
+
+### 4. Twilio WhatsApp + Voice Setup
+Create backend env file at [backend/.env](backend/.env) (already added in this workspace) with:
+
+```env
+TWILIO_ACCOUNT_SID=your_sid
+TWILIO_AUTH_TOKEN=your_token
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+```
+
+Then configure Twilio Sandbox/WhatsApp webhook:
+
+```text
+Webhook URL: https://<your-public-url>/api/whatsapp/webhook
+Method: POST
+```
+
+For local development, expose backend with ngrok or Cloudflare tunnel:
+
+```bash
+ngrok http 8010
+```
+
+Voice notes and image uploads sent in WhatsApp are auto-processed and filed as complaints.
+
+### 5. Model Training (Optional)
+If you want to retrain custom models locally:
+
+```bash
 cd backend
-python ml/train_classifier.py  # Train Text classifier
-python ml/train_sentiment.py   # Train Sentiment model
+python ml/train_classifier.py  # Train text classifier
+python ml/train_sentiment.py   # Train sentiment model
 python ml/train_yolo.py        # Train YOLOv8 damage detector
-📁 Project Structure
-Plaintext
-janshakti-ai/
-├── src/                  # Next.js Frontend
+```
+
+## 📁 Project Structure
+
+```text
+JanShakti-AI/
+├── src/                  # Next.js frontend
 │   ├── app/              # Pages (landing, dashboard, citizen, analytics, etc.)
 │   ├── components/       # Reusable UI (Navbar, Footer, etc.)
-│   └── lib/              # Utilities and Mock data
-├── backend/              # FastAPI Backend
+│   └── lib/              # Utilities and mock data
+├── backend/              # FastAPI backend
 │   ├── main.py           # Application entry point
 │   ├── routers/          # API endpoints (complaints, nlp, priority, etc.)
 │   ├── services/         # AI/ML inference services
-│   ├── models/           # Database models & Pydantic schemas
+│   ├── models/           # Database models and Pydantic schemas
 │   └── ml/               # Model training and evaluation scripts
 └── README.md
-👨‍💻 The Team
+```
+
+## 👨‍💻 The Team
+
 Team !Perfect (IIITA)
 
-Krishna Mohan
+- Krishna Mohan
+- Varun Karankar
+- Aditya Kishore
+- Kanishk Jain
 
-Varun Karankar
+## 📜 Acknowledgements & License
 
-Aditya Kishore
-
-Kanishk Jain
-
-📜 Acknowledgements & License
 Proudly built for the Sankalp Hackathon 2026.

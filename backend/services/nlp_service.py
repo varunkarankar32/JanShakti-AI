@@ -6,9 +6,17 @@ Falls back to keyword-based classification if no trained model is available.
 
 import os
 import re
-import json
 import joblib
 from typing import Dict, List, Tuple
+from config import CLASSIFIER_MODEL_PATH
+
+
+try:
+    from transformers import pipeline as hf_pipeline
+    HF_AVAILABLE = True
+except ImportError:
+    HF_AVAILABLE = False
+    print("[NLP] transformers not installed — zero-shot model unavailable")
 
 
 # Category keywords for fallback classification
@@ -24,6 +32,19 @@ CATEGORY_KEYWORDS = {
     "Public Transport": ["bus", "transport", "auto", "rickshaw", "station", "route", "schedule", "fare", "overcrowding"],
 }
 
+CATEGORY_LABELS = [
+    "Water Supply",
+    "Roads & Potholes",
+    "Drainage",
+    "Electricity",
+    "Garbage & Sanitation",
+    "Safety & Security",
+    "Public Health",
+    "Education",
+    "Public Transport",
+    "Others",
+]
+
 # Urgency keywords
 URGENCY_KEYWORDS = {
     "critical": ["emergency", "danger", "collapse", "gas leak", "fire", "flood", "accident", "children at risk", "hospital", "electrocution", "death", "life-threatening"],
@@ -34,24 +55,43 @@ URGENCY_KEYWORDS = {
 
 
 class NLPService:
-    def __init__(self, model_path: str = "ml/weights/classifier.pkl"):
+    def __init__(
+        self,
+        model_path: str = CLASSIFIER_MODEL_PATH,
+        zero_shot_model_name: str = "typeform/distilbert-base-uncased-mnli",
+    ):
         self.model = None
         self.vectorizer = None
         self.model_path = model_path
+        self.zero_shot_classifier = None
+        self.zero_shot_model_name = os.getenv("NLP_ZERO_SHOT_MODEL", zero_shot_model_name)
         self._load_model()
 
     def _load_model(self):
-        """Try to load a trained model; fall back to keyword-based."""
+        """Load local model first, then fallback to a pretrained zero-shot model."""
         try:
             if os.path.exists(self.model_path):
                 bundle = joblib.load(self.model_path)
                 self.model = bundle["model"]
                 self.vectorizer = bundle["vectorizer"]
                 print(f"[NLP] Loaded trained classifier from {self.model_path}")
-            else:
-                print("[NLP] No trained model found — using keyword-based classifier")
+                return
         except Exception as e:
-            print(f"[NLP] Error loading model: {e} — using keyword-based classifier")
+            print(f"[NLP] Error loading local model: {e}")
+
+        if HF_AVAILABLE:
+            try:
+                self.zero_shot_classifier = hf_pipeline(
+                    "zero-shot-classification",
+                    model=self.zero_shot_model_name,
+                    device=-1,
+                )
+                print(f"[NLP] Loaded pretrained zero-shot model: {self.zero_shot_model_name}")
+                return
+            except Exception as e:
+                print(f"[NLP] Error loading zero-shot model: {e}")
+
+        print("[NLP] Using keyword-based classifier fallback")
 
     def classify(self, text: str) -> Tuple[str, float]:
         """
@@ -70,6 +110,22 @@ class NLPService:
                 return prediction, confidence
             except Exception as e:
                 print(f"[NLP] ML prediction error: {e}")
+
+        # Zero-shot pretrained fallback
+        if self.zero_shot_classifier:
+            try:
+                result = self.zero_shot_classifier(
+                    text[:1024],
+                    candidate_labels=CATEGORY_LABELS,
+                    hypothesis_template="This complaint is about {}.",
+                    multi_label=False,
+                )
+                label = result["labels"][0]
+                confidence = float(result["scores"][0])
+                if confidence >= 0.35:
+                    return label, confidence
+            except Exception as e:
+                print(f"[NLP] Zero-shot prediction error: {e}")
 
         # Keyword-based fallback
         scores = {}

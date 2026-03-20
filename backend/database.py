@@ -33,6 +33,7 @@ def _ensure_complaint_workflow_columns():
     required_columns = {
         "citizen_user_id": "INTEGER",
         "assigned_authority": "VARCHAR",
+        "authority_email": "VARCHAR",
         "leader_note": "TEXT",
         "authority_response": "TEXT",
         "citizen_update": "TEXT",

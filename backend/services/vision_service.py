@@ -9,6 +9,8 @@ import json
 from typing import Dict, List
 from PIL import Image
 import io
+import re
+from config import YOLO_MODEL_PATH
 
 # Try to load ultralytics
 try:
@@ -38,22 +40,48 @@ SEVERITY_THRESHOLDS = {
     "low": 0.0,
 }
 
+ISSUE_KEYWORDS = {
+    "pothole",
+    "road",
+    "crack",
+    "garbage",
+    "dump",
+    "pipe",
+    "water",
+    "drain",
+    "streetlight",
+    "wall",
+    "tree",
+    "damage",
+    "infrastructure",
+}
+
 
 class VisionService:
-    def __init__(self, model_path: str = "ml/weights/yolov8_damage.pt"):
+    def __init__(self, model_path: str = YOLO_MODEL_PATH):
         self.model = None
         self.model_path = model_path
+        self.fallback_model = os.getenv("YOLO_FALLBACK_MODEL", "yolov8n.pt")
         self._load_model()
 
     def _load_model(self):
-        if YOLO_AVAILABLE and os.path.exists(self.model_path):
-            try:
-                self.model = YOLO(self.model_path)
-                print(f"[Vision] Loaded YOLOv8 model from {self.model_path}")
-            except Exception as e:
-                print(f"[Vision] Error loading model: {e}")
-        else:
-            print("[Vision] No YOLO model found — using simulated detection")
+        if YOLO_AVAILABLE:
+            candidates = []
+
+            if self.model_path and os.path.exists(self.model_path):
+                candidates.append(self.model_path)
+
+            candidates.append(self.fallback_model)
+
+            for candidate in candidates:
+                try:
+                    self.model = YOLO(candidate)
+                    print(f"[Vision] Loaded YOLO model: {candidate}")
+                    return
+                except Exception as e:
+                    print(f"[Vision] Error loading model '{candidate}': {e}")
+
+        print("[Vision] YOLO model unavailable — using simulated detection")
 
     def detect(self, image_bytes: bytes) -> Dict:
         """
@@ -64,6 +92,14 @@ class VisionService:
             return self._yolo_detect(image_bytes)
         return self._simulated_detect(image_bytes)
 
+    def _normalize_class_name(self, name: str) -> str:
+        cleaned = re.sub(r"\s+", "_", str(name).strip().lower())
+        return cleaned
+
+    def _is_issue_class(self, cls_name: str) -> bool:
+        name = self._normalize_class_name(cls_name)
+        return any(token in name for token in ISSUE_KEYWORDS)
+
     def _yolo_detect(self, image_bytes: bytes) -> Dict:
         """Run actual YOLOv8 inference."""
         try:
@@ -72,13 +108,17 @@ class VisionService:
 
             detections = []
             for result in results:
+                names = getattr(result, "names", None) or getattr(self.model, "names", {})
                 for box in result.boxes:
                     cls_id = int(box.cls[0])
                     conf = float(box.conf[0])
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
 
+                    class_name = names.get(cls_id, DAMAGE_CLASSES.get(cls_id, f"class_{cls_id}"))
+                    class_name = self._normalize_class_name(class_name)
+
                     detection = {
-                        "class": DAMAGE_CLASSES.get(cls_id, f"class_{cls_id}"),
+                        "class": str(class_name),
                         "confidence": round(conf, 3),
                         "bbox": {
                             "x1": round(x1, 1),
@@ -90,15 +130,17 @@ class VisionService:
                     detections.append(detection)
 
             if not detections:
-                return {
-                    "detections": [],
-                    "category": "Unknown",
-                    "severity": "low",
-                    "confidence": 0.0,
-                }
+                # If model misses all objects, fall back to heuristic image analysis.
+                return self._simulated_detect(image_bytes)
+
+            issue_detections = [d for d in detections if self._is_issue_class(d["class"])]
+            if not issue_detections:
+                heuristic = self._simulated_detect(image_bytes)
+                heuristic["detections"] = detections + heuristic.get("detections", [])
+                return heuristic
 
             # Use highest-confidence detection
-            best = max(detections, key=lambda d: d["confidence"])
+            best = max(issue_detections, key=lambda d: d["confidence"])
             severity = self._get_severity(best["confidence"])
 
             return {
@@ -160,9 +202,9 @@ class VisionService:
         except Exception as e:
             return {
                 "detections": [],
-                "category": "Unknown",
+                "category": "Infrastructure Issue",
                 "severity": "low",
-                "confidence": 0.0,
+                "confidence": 0.35,
             }
 
     def _get_severity(self, confidence: float) -> str:

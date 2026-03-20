@@ -18,11 +18,11 @@ import json
 import httpx
 from typing import Dict, Optional
 from datetime import datetime
+from services.complaint_extraction_service import complaint_extraction_service
 
 # Try Twilio
 try:
     from twilio.rest import Client as TwilioClient
-    from twilio.twiml.messaging_response import MessagingResponse
     TWILIO_AVAILABLE = True
 except ImportError:
     TWILIO_AVAILABLE = False
@@ -82,12 +82,39 @@ class WhatsAppBotService:
         # Twilio client (optional)
         self.twilio_client = None
         self.twilio_from = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
+        self.twilio_account_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
+        self.twilio_auth_token = os.getenv("TWILIO_AUTH_TOKEN", "")
         if TWILIO_AVAILABLE:
-            account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-            auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-            if account_sid and auth_token:
-                self.twilio_client = TwilioClient(account_sid, auth_token)
+            if self.twilio_account_sid and self.twilio_auth_token:
+                self.twilio_client = TwilioClient(self.twilio_account_sid, self.twilio_auth_token)
                 print(f"[WhatsApp] Twilio client initialized")
+
+    def _guess_extension(self, media_type: Optional[str], default: str = "ogg") -> str:
+        if not media_type:
+            return default
+
+        normalized = media_type.lower().split(";")[0].strip()
+        mapping = {
+            "audio/ogg": "ogg",
+            "audio/oga": "ogg",
+            "audio/amr": "amr",
+            "audio/wav": "wav",
+            "audio/x-wav": "wav",
+            "audio/mpeg": "mp3",
+            "audio/mp4": "m4a",
+            "audio/aac": "aac",
+        }
+        return mapping.get(normalized, default)
+
+    def _download_media_bytes(self, media_url: str) -> bytes:
+        """Download media bytes, using Twilio auth when required."""
+        auth = None
+        if self.twilio_account_sid and self.twilio_auth_token and "api.twilio.com" in media_url:
+            auth = (self.twilio_account_sid, self.twilio_auth_token)
+
+        response = httpx.get(media_url, timeout=45, auth=auth, follow_redirects=True)
+        response.raise_for_status()
+        return response.content
 
     def _get_session(self, phone: str) -> Dict:
         if phone not in self.sessions:
@@ -137,10 +164,11 @@ class WhatsAppBotService:
 
         # Handle media (photos / voice)
         if media_url:
-            if media_type and "image" in media_type:
+            media_type_lc = (media_type or "").lower()
+            if "image" in media_type_lc:
                 return self._handle_photo(phone, media_url, db)
-            elif media_type and ("audio" in media_type or "ogg" in media_type):
-                return self._handle_voice(phone, media_url, db)
+            elif "audio" in media_type_lc or "ogg" in media_type_lc:
+                return self._handle_voice(phone, media_url, media_type, db)
 
         # Global commands (work in any state)
         if msg in ["hi", "hello", "hey", "start", "menu", "help", "namaste"]:
@@ -237,8 +265,27 @@ class WhatsAppBotService:
         if len(description.strip()) < 10:
             return "❌ Please provide more detail (at least 10 characters)."
 
-        session["data"]["description"] = description.strip()
-        session["data"]["title"] = description.strip()[:80]
+        try:
+            extracted = complaint_extraction_service.extract_from_text(
+                text=description,
+                ward_hint=session["data"].get("ward"),
+                category_hint=session["data"].get("category"),
+                source="text",
+            )
+        except ValueError as exc:
+            return f"❌ {exc}"
+
+        session["data"].update(
+            {
+                "title": extracted["title"],
+                "description": extracted["description"],
+                "category": extracted["category"],
+                "ward": extracted["ward"],
+                "location": extracted.get("location", ""),
+                "input_mode": "text",
+                "ai": extracted.get("ai", {}),
+            }
+        )
 
         # File the complaint
         return self._create_complaint(phone, session["data"], db)
@@ -290,38 +337,26 @@ class WhatsAppBotService:
     def _handle_photo(self, phone: str, media_url: str, db=None) -> str:
         """Process photo — run AI vision detection and auto-file complaint."""
         try:
-            # Download image
-            response = httpx.get(media_url, timeout=30)
-            image_bytes = response.content
+            image_bytes = self._download_media_bytes(media_url)
+            extracted = complaint_extraction_service.extract_from_image(
+                image_bytes=image_bytes,
+                ward_hint="Ward 1",
+            )
 
-            # Run vision AI
-            from services.vision_service import vision_service
-            result = vision_service.detect(image_bytes)
-
-            category_map = {
-                "Pothole": "Roads & Potholes",
-                "Road Crack": "Roads & Potholes",
-                "Road Damage": "Roads & Potholes",
-                "Garbage Dump": "Garbage & Sanitation",
-                "Broken Pipe": "Water Supply",
-                "Waterlogging": "Drainage",
-                "Broken Streetlight": "Electricity",
-                "Damaged Wall": "Safety & Security",
-                "Infrastructure Issue": "Roads & Potholes",
-            }
-
+            result = extracted.get("ai_detection_result", {})
             detected = result.get("category", "Unknown")
             severity = result.get("severity", "medium")
-            confidence = result.get("confidence", 0)
-            category = category_map.get(detected, "Roads & Potholes")
+            confidence = float(result.get("confidence", 0.0) or 0.0)
 
-            # Auto-file complaint
             data = {
-                "title": f"[Photo] {detected} detected via WhatsApp",
-                "description": f"AI-detected issue: {detected} (severity: {severity}, confidence: {confidence:.0%}). Submitted via WhatsApp photo.",
-                "category": category,
-                "ward": "Ward 1",  # Default — will ask user to confirm
-                "input_mode": "image",
+                "title": extracted["title"],
+                "description": extracted["description"],
+                "category": extracted["category"],
+                "ward": extracted["ward"],
+                "location": extracted.get("location", ""),
+                "input_mode": "photo",
+                "ai": extracted.get("ai", {}),
+                "ai_detection_result": result,
             }
 
             ticket_id = self._create_complaint_from_data(phone, data, db)
@@ -331,7 +366,7 @@ class WhatsAppBotService:
                 f"🔍 Detected: *{detected}*\n"
                 f"⚠️ Severity: *{severity.title()}*\n"
                 f"🎯 Confidence: {confidence:.0%}\n"
-                f"📂 Category: {category}\n\n"
+                f"📂 Category: {extracted['category']}\n\n"
                 f"✅ *Complaint auto-filed!*\n"
                 f"🎫 Ticket: *{ticket_id}*\n\n"
                 f"Track status anytime by typing *status*."
@@ -341,42 +376,41 @@ class WhatsAppBotService:
             print(f"[WhatsApp] Photo processing error: {e}")
             return "❌ Could not process the photo. Please try again or describe the issue in text."
 
-    def _handle_voice(self, phone: str, media_url: str, db=None) -> str:
+    def _handle_voice(self, phone: str, media_url: str, media_type: Optional[str] = None, db=None) -> str:
         """Process voice note — transcribe via Whisper and auto-file."""
         try:
-            # Download audio
-            response = httpx.get(media_url, timeout=30)
-            audio_bytes = response.content
+            audio_bytes = self._download_media_bytes(media_url)
+            ext = self._guess_extension(media_type, default="ogg")
+            extracted = complaint_extraction_service.extract_from_voice(
+                audio_bytes=audio_bytes,
+                file_extension=ext,
+                ward_hint="Ward 1",
+            )
 
-            # Transcribe
-            from services.speech_service import speech_service
-            result = speech_service.transcribe(audio_bytes, "ogg")
-
-            text = result.get("text", "")
-            language = result.get("language", "Unknown")
-
-            if not text or len(text) < 5:
-                return "❌ Could not transcribe the audio. Please try again or type your complaint."
-
-            # Classify the transcribed text
-            from services.nlp_service import nlp_service
-            category, confidence = nlp_service.classify(text)
+            speech_meta = extracted.get("speech", {})
+            language = speech_meta.get("language", "Unknown")
+            transcript = extracted.get("transcript", extracted["description"])
 
             data = {
-                "title": f"[Voice] {text[:80]}",
-                "description": f"{text}\n\n[Transcribed from {language} voice note via WhatsApp]",
-                "category": category,
-                "ward": "Ward 1",
+                "title": extracted["title"],
+                "description": extracted["description"],
+                "category": extracted["category"],
+                "ward": extracted["ward"],
+                "location": extracted.get("location", ""),
                 "input_mode": "voice",
+                "ai": extracted.get("ai", {}),
             }
 
             ticket_id = self._create_complaint_from_data(phone, data, db)
 
+            category_conf = extracted.get("ai", {}).get("category_confidence", 0.0)
+
             return (
                 f"🎤 *Voice Transcription*\n\n"
                 f"🗣️ Language: {language}\n"
-                f"📝 Text: _{text}_\n\n"
-                f"📂 Auto-category: *{category}* ({confidence:.0%})\n\n"
+                f"📝 Complaint Statement: _{extracted['description']}_\n"
+                f"📜 Transcript: _{transcript}_\n\n"
+                f"📂 Auto-category: *{extracted['category']}* ({category_conf:.0%})\n\n"
                 f"✅ *Complaint filed!*\n"
                 f"🎫 Ticket: *{ticket_id}*\n\n"
                 f"Track status anytime by typing *status*."
@@ -420,13 +454,16 @@ class WhatsAppBotService:
                 from models.complaint import Complaint, ComplaintStatus, PriorityLevel, InputMode
                 from services.nlp_service import nlp_service
                 from services.priority_engine import priority_engine
-                from services.sentiment_service import sentiment_service
 
                 description = data.get("description", "")
                 category = data.get("category", "Others")
+                ai_payload = data.get("ai") or {}
 
                 # AI processing
-                ai_category, ai_confidence = nlp_service.classify(description)
+                ai_category = ai_payload.get("category")
+                if not ai_category:
+                    ai_category, _ = nlp_service.classify(description)
+
                 priority_result = priority_engine.calculate_score(
                     text=description,
                     category=category,
@@ -434,13 +471,19 @@ class WhatsAppBotService:
                     recurrence_count=0,
                     social_mentions=0,
                 )
-                sentiment_result = sentiment_service.analyze(description)
 
                 input_mode_str = data.get("input_mode", "text")
+                if input_mode_str == "image":
+                    input_mode_str = "photo"
+
                 try:
                     input_mode = InputMode(input_mode_str)
                 except ValueError:
                     input_mode = InputMode.TEXT
+
+                detection_json = None
+                if data.get("ai_detection_result"):
+                    detection_json = json.dumps(data.get("ai_detection_result"))
 
                 complaint = Complaint(
                     ticket_id=ticket_id,
@@ -458,7 +501,8 @@ class WhatsAppBotService:
                     recurrence_score=priority_result["recurrence"],
                     sentiment_score=priority_result["sentiment"],
                     ai_category=ai_category,
-                    ai_entities=json.dumps({}),
+                    ai_entities=json.dumps(ai_payload),
+                    ai_detection_result=detection_json,
                     status=ComplaintStatus.OPEN,
                     input_mode=input_mode,
                 )

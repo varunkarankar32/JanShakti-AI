@@ -46,6 +46,7 @@ env/
 # ML weights (large files)
 backend/ml/weights/
 backend/ml/runs/
+backend/*.pt
 backend/uploads/
 backend/*.db
 
