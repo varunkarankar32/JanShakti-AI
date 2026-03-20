@@ -65,9 +65,6 @@ cd backend
 # Install Python dependencies
 pip install -r requirements.txt
 
-# Required for Whisper audio decoding (Windows/macOS/Linux)
-# Install ffmpeg and ensure it is available in PATH
-
 # Run the FastAPI server
 uvicorn main:app --host 127.0.0.1 --port 8010
 # → Swagger API Docs accessible at http://127.0.0.1:8010/docs

@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { MapPin, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
 import { mockTrendData, mockAlerts, mockActionQueue, mockWardHeatData, mockCategoryDistribution, STATUS_CONFIG } from '@/lib/mockData';
+
+const API_BASE = '';
 
 interface LiveComplaint {
   id: number;
@@ -265,7 +269,8 @@ export default function DashboardPage() {
     setActionMessage('');
 
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`, {
+      const actionUrl = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+      const res = await fetch(actionUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -185,7 +185,12 @@ export default function CitizenPortal() {
       headers: { Authorization: `Bearer ${authToken}`, 'Cache-Control': 'no-cache' },
     })
       .then(async (res) => {
-        if (!res.ok) return; // Keep user in — any issues handled at submit time
+        if (res.status === 401) {
+          handleLogout();
+          setAuthError('Your session expired. Please log in again to continue.');
+          return;
+        }
+        if (!res.ok) return;
         const user = await res.json();
         setAuthUser(user);
         setContactPhone(user?.phone || '');
@@ -272,7 +277,7 @@ export default function CitizenPortal() {
         ? { name: authName.trim(), email: authEmail.trim(), phone: authPhone.trim() || null, password: authPassword }
         : { email: authEmail.trim(), password: authPassword };
 
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
