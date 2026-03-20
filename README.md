@@ -62,7 +62,7 @@ cd backend
 
 # Install Python dependencies
 pip install -r requirements.txt
-
+   
 # Run the FastAPI server
 uvicorn main:app --host 127.0.0.1 --port 8000
 # → Swagger API Docs accessible at http://localhost:8000/docs
