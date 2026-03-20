@@ -2,28 +2,40 @@
 Complaints Router — CRUD and workflow operations for citizen complaints.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 import json
+import math
+import os
 import smtplib
 import uuid
 from email.message import EmailMessage
 from urllib.parse import quote
 
+import cv2
+import numpy as np
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import desc
+from sqlalchemy import desc, func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models.complaint import Complaint, ComplaintActivity, ComplaintStatus, PriorityLevel, InputMode
 from models.schemas import ComplaintCreate, ComplaintUpdate, ComplaintResponse
 from models.user import User
-from routers.auth import get_current_user, get_current_leader
+from routers.auth import (
+    get_current_authority,
+    get_current_leader,
+    get_current_leader_or_authority,
+    get_current_user,
+)
 from services.priority_engine import priority_engine
 from services.sentiment_service import sentiment_service
 from services.complaint_extraction_service import complaint_extraction_service
-from config import SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_EMAIL, SMTP_USE_TLS
+from services.whatsapp_service import whatsapp_bot
+from config import SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_EMAIL, SMTP_USE_TLS, UPLOAD_DIR
 
 router = APIRouter(prefix="/complaints", tags=["Complaints"])
 
@@ -36,8 +48,18 @@ class LeaderAssignRequest(BaseModel):
 
 
 class AuthorityResponseRequest(BaseModel):
-    authority_name: str
+    authority_name: Optional[str] = None
     response: str
+    mark_verification_ready: bool = False
+
+
+class AuthorityAcknowledgeRequest(BaseModel):
+    note: Optional[str] = None
+
+
+class AuthorityLeaderMessageRequest(BaseModel):
+    message: str
+    blocker: bool = False
     mark_verification_ready: bool = False
 
 
@@ -134,6 +156,335 @@ def _dispatch_mail(to_email: str, subject: str, body: str):
     return {"delivered": True, "mode": "smtp"}
 
 
+SUPPORTED_LANGS = {"en", "hi", "hinglish"}
+INCIDENT_STOP_WORDS = {
+    "the", "and", "with", "from", "near", "this", "that", "issue", "complaint", "road", "ward",
+    "for", "has", "have", "been", "not", "all", "due", "are", "was", "were", "our",
+}
+
+
+def _normalize_language(raw_lang: Optional[str]) -> str:
+    if not raw_lang:
+        return "en"
+    lang = str(raw_lang).strip().lower()
+    if lang in SUPPORTED_LANGS:
+        return lang
+    if lang.startswith("hi"):
+        return "hi"
+    return "en"
+
+
+def _build_citizen_update(
+    status: str,
+    ticket_id: str,
+    language: str,
+    authority: Optional[str] = None,
+    note: Optional[str] = None,
+) -> str:
+    lang = _normalize_language(language)
+    authority_name = authority or "assigned team"
+
+    updates = {
+        "en": {
+            "assigned": f"Ticket {ticket_id} is assigned to {authority_name}. Team mobilization has started.",
+            "in_progress": f"Work is now in progress for ticket {ticket_id}. Field crew is active.",
+            "verification": f"Work for ticket {ticket_id} is reported complete and is under leader verification.",
+            "resolved": f"Leader verified completion. Ticket {ticket_id} is solved. Please share your rating.",
+            "open": f"Ticket {ticket_id} is open and queued for triage.",
+            "flagged": f"Ticket {ticket_id} was flagged in verification and requires rework by the authority.",
+        },
+        "hi": {
+            "assigned": f"टिकट {ticket_id} को {authority_name} को सौंप दिया गया है। टीम काम शुरू कर रही है।",
+            "in_progress": f"टिकट {ticket_id} पर कार्य प्रगति पर है। फील्ड टीम साइट पर काम कर रही है।",
+            "verification": f"टिकट {ticket_id} का काम पूरा बताया गया है और अभी लीडर सत्यापन में है।",
+            "resolved": f"लीडर ने कार्य सत्यापित कर दिया है। टिकट {ticket_id} अब हल हो चुका है। कृपया रेटिंग दें।",
+            "open": f"टिकट {ticket_id} दर्ज हो गया है और प्राथमिक जांच के लिए कतार में है।",
+            "flagged": f"टिकट {ticket_id} का सत्यापन संदिग्ध मिला। दोबारा कार्यवाही आवश्यक है।",
+        },
+        "hinglish": {
+            "assigned": f"Ticket {ticket_id} ko {authority_name} ko assign kar diya gaya hai. Team nikal chuki hai.",
+            "in_progress": f"Ticket {ticket_id} par kaam start ho gaya hai. Field team site par hai.",
+            "verification": f"Ticket {ticket_id} ka kaam complete report hua hai, ab leader verification chal raha hai.",
+            "resolved": f"Leader verification complete. Ticket {ticket_id} solve ho gaya. Please rating zaroor dein.",
+            "open": f"Ticket {ticket_id} register ho gaya hai aur triage queue mein hai.",
+            "flagged": f"Ticket {ticket_id} verification mein flag hua. Team ko rework karna hoga.",
+        },
+    }
+    base = updates[lang].get(status, updates[lang]["open"])
+    if note:
+        return f"{base} Note: {note}"
+    return base
+
+
+def _safe_notify_citizen(complaint: Complaint, status: str, note: Optional[str] = None):
+    message = _build_citizen_update(
+        status=status,
+        ticket_id=complaint.ticket_id,
+        language=complaint.citizen_language or "en",
+        authority=complaint.assigned_authority,
+        note=note,
+    )
+    complaint.citizen_update = message
+
+    if complaint.citizen_phone:
+        try:
+            whatsapp_bot.send_status_update(
+                phone=complaint.citizen_phone,
+                ticket_id=complaint.ticket_id,
+                status=status,
+                message=message,
+            )
+        except Exception:
+            # Notification failures should not block complaint workflow updates.
+            pass
+
+
+def _save_verification_photo(ticket_id: str, stage: str, data: bytes, original_name: str) -> str:
+    verification_dir = Path(UPLOAD_DIR) / "verification"
+    verification_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = Path(original_name or "").suffix.lower() or ".jpg"
+    filename = f"{ticket_id}_{stage}_{uuid.uuid4().hex[:8]}{ext}"
+    rel_path = (verification_dir / filename).as_posix()
+
+    with open(rel_path, "wb") as f:
+        f.write(data)
+
+    return rel_path
+
+
+def _save_citizen_media(data: bytes, original_name: str, media_kind: str) -> str:
+    media_dir = Path(UPLOAD_DIR) / "citizen_media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = Path(original_name or "").suffix.lower()
+    if not ext:
+        ext = ".jpg" if media_kind == "image" else ".wav"
+
+    filename = f"{media_kind}_{uuid.uuid4().hex[:12]}{ext}"
+    rel_path = (media_dir / filename).as_posix()
+
+    with open(rel_path, "wb") as f:
+        f.write(data)
+
+    return rel_path
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    raw = value.strip()
+    try:
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371000.0
+    p1 = math.radians(lat1)
+    p2 = math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _compute_visual_change(before_path: str, after_path: str) -> dict:
+    img_before = cv2.imread(before_path)
+    img_after = cv2.imread(after_path)
+    if img_before is None or img_after is None:
+        raise ValueError("Unable to read verification images")
+
+    resized_before = cv2.resize(img_before, (640, 480))
+    resized_after = cv2.resize(img_after, (640, 480))
+
+    gray_before = cv2.cvtColor(resized_before, cv2.COLOR_BGR2GRAY)
+    gray_after = cv2.cvtColor(resized_after, cv2.COLOR_BGR2GRAY)
+
+    abs_diff = cv2.absdiff(gray_before, gray_after)
+    diff_ratio = float(np.mean(abs_diff)) / 255.0
+
+    hist_before = cv2.calcHist([gray_before], [0], None, [64], [0, 256])
+    hist_after = cv2.calcHist([gray_after], [0], None, [64], [0, 256])
+    cv2.normalize(hist_before, hist_before)
+    cv2.normalize(hist_after, hist_after)
+
+    hist_corr = float(cv2.compareHist(hist_before, hist_after, cv2.HISTCMP_CORREL))
+    hist_corr = max(-1.0, min(1.0, hist_corr))
+
+    visual_change_score = max(0.0, min(100.0, (diff_ratio * 140.0) + ((1.0 - hist_corr) * 45.0)))
+    min_dim = float(min(gray_before.shape[0], gray_before.shape[1]))
+    confidence = 60.0 if min_dim < 240 else 75.0 if min_dim < 480 else 90.0
+
+    return {
+        "score": round(visual_change_score, 1),
+        "confidence": round(confidence, 1),
+        "difference_ratio": round(diff_ratio, 4),
+        "histogram_similarity": round(hist_corr, 4),
+    }
+
+
+def _verification_summary(complaint: Complaint) -> dict:
+    before_meta = json.loads(complaint.before_meta) if complaint.before_meta else {}
+    after_meta = json.loads(complaint.after_meta) if complaint.after_meta else {}
+
+    before_lat = before_meta.get("latitude")
+    before_lon = before_meta.get("longitude")
+    after_lat = after_meta.get("latitude")
+    after_lon = after_meta.get("longitude")
+
+    geo_distance_m = None
+    geo_score = 25.0
+    geotag_status = "missing"
+    if before_lat is None and before_lon is None and complaint.latitude is not None and complaint.longitude is not None:
+        before_lat = complaint.latitude
+        before_lon = complaint.longitude
+
+    if all(v is not None for v in [before_lat, before_lon, after_lat, after_lon]):
+        geo_distance_m = _haversine_m(float(before_lat), float(before_lon), float(after_lat), float(after_lon))
+        if geo_distance_m <= 50:
+            geo_score = 100.0
+            geotag_status = "matched"
+        elif geo_distance_m <= 100:
+            geo_score = 82.0
+            geotag_status = "near_match"
+        elif geo_distance_m <= 250:
+            geo_score = 56.0
+            geotag_status = "mismatch"
+        else:
+            geo_score = 20.0
+            geotag_status = "mismatch"
+
+    before_ts = _parse_iso_datetime(before_meta.get("captured_at") or before_meta.get("uploaded_at"))
+    after_ts = _parse_iso_datetime(after_meta.get("captured_at") or after_meta.get("uploaded_at"))
+    time_score = 60.0
+    if before_ts and after_ts:
+        delta_hours = (after_ts - before_ts).total_seconds() / 3600.0
+        if delta_hours < 0:
+            time_score = 10.0
+        elif delta_hours <= 72:
+            time_score = 100.0
+        elif delta_hours <= 168:
+            time_score = 85.0
+        elif delta_hours <= 720:
+            time_score = 62.0
+        else:
+            time_score = 35.0
+
+    visual_result = _compute_visual_change(complaint.before_photo or "", complaint.after_photo or "")
+    visual_score = float(visual_result["score"])
+
+    final_score = round((visual_score * 0.55) + (geo_score * 0.25) + (time_score * 0.20), 1)
+    confidence = round((float(visual_result["confidence"]) * 0.6) + (geo_score * 0.2) + (time_score * 0.2), 1)
+
+    status = "verified" if final_score >= 72.0 and visual_score >= 25.0 else "flagged"
+    reasons = []
+    if geo_distance_m is not None and geo_distance_m > 100:
+        reasons.append("location_mismatch")
+    if geotag_status == "missing":
+        reasons.append("geotag_missing")
+    if visual_score < 25.0:
+        reasons.append("low_visual_change")
+    if time_score < 35.0:
+        reasons.append("time_window_suspicious")
+
+    return {
+        "status": status,
+        "verification_score": final_score,
+        "verification_confidence": round(min(99.0, confidence), 1),
+        "components": {
+            "visual_score": round(visual_score, 1),
+            "geo_score": round(geo_score, 1),
+            "time_score": round(time_score, 1),
+            "geo_distance_m": round(geo_distance_m, 1) if geo_distance_m is not None else None,
+            "geotag_status": geotag_status,
+            "visual_details": visual_result,
+        },
+        "reasons": reasons,
+    }
+
+
+def _incident_key(complaint: Complaint) -> str:
+    tokens = [
+        t
+        for t in "".join(ch.lower() if ch.isalnum() else " " for ch in (complaint.title or "")).split()
+        if len(t) > 2 and t not in INCIDENT_STOP_WORDS
+    ]
+    signature = " ".join(tokens[:6]) or "generic"
+    return f"{complaint.ward}|{complaint.category}|{signature}"
+
+
+def _is_authority_assigned(complaint: Complaint, current_user: User) -> bool:
+    role = (current_user.role or "citizen").lower()
+    if role == "leader":
+        return True
+
+    user_email = (current_user.email or "").strip().lower()
+    user_name = (current_user.name or "").strip().lower()
+
+    authority_email = (complaint.authority_email or "").strip().lower()
+    assigned_authority = (complaint.assigned_authority or "").strip().lower()
+    assigned_team = (complaint.assigned_to or "").strip().lower()
+
+    if user_email and authority_email and user_email == authority_email:
+        return True
+
+    if user_name and user_name in {assigned_authority, assigned_team}:
+        return True
+
+    return False
+
+
+def _ensure_authority_access(complaint: Complaint, current_user: User):
+    if not _is_authority_assigned(complaint, current_user):
+        raise HTTPException(status_code=403, detail="You are not assigned to this complaint")
+
+
+def _unresponded_hours(complaint: Complaint) -> float:
+    if complaint.status not in {ComplaintStatus.OPEN, ComplaintStatus.ASSIGNED}:
+        return 0.0
+    if complaint.authority_response or complaint.leader_note:
+        return 0.0
+    if not complaint.created_at:
+        return 0.0
+    return max(0.0, (datetime.now() - complaint.created_at).total_seconds() / 3600.0)
+
+
+def _effective_priority_snapshot(complaint: Complaint):
+    base_score = float(complaint.ai_score or 0.0)
+    unresponded_hours = _unresponded_hours(complaint)
+    starvation_bonus = priority_engine.calculate_starvation_bonus(unresponded_hours)
+    effective_score = round(min(100.0, base_score + starvation_bonus), 1)
+    effective_priority = priority_engine.score_to_priority(effective_score)
+    return effective_score, effective_priority, starvation_bonus, unresponded_hours
+
+
+def _apply_starvation_escalation(db: Session):
+    active = (
+        db.query(Complaint)
+        .filter(Complaint.status != ComplaintStatus.RESOLVED)
+        .all()
+    )
+
+    changed = False
+    for complaint in active:
+        effective_score, effective_priority, _, _ = _effective_priority_snapshot(complaint)
+        if effective_score > float(complaint.ai_score or 0.0):
+            complaint.ai_score = effective_score
+            changed = True
+
+        if complaint.priority is None or complaint.priority.value != effective_priority:
+            complaint.priority = PriorityLevel(effective_priority)
+            changed = True
+
+    if changed:
+        db.commit()
+
+
 @router.post("", response_model=ComplaintResponse)
 def create_complaint(
     complaint: ComplaintCreate,
@@ -157,11 +508,20 @@ def create_complaint(
     category = complaint.category if complaint.category else extracted["category"]
     ai_meta = extracted.get("ai", {})
 
+    recurrence_count = (
+        db.query(Complaint)
+        .filter(Complaint.ward == complaint.ward)
+        .filter(Complaint.category == category)
+        .filter(Complaint.status != ComplaintStatus.RESOLVED)
+        .filter(Complaint.created_at >= datetime.now() - timedelta(days=30))
+        .count()
+    )
+
     priority_result = priority_engine.calculate_score(
         text=refined_description,
         category=category,
         ward=complaint.ward,
-        recurrence_count=0,
+        recurrence_count=recurrence_count,
         social_mentions=0,
     )
     _ = sentiment_service.analyze(refined_description)
@@ -181,6 +541,9 @@ def create_complaint(
         citizen_user_id=current_user.id,
         citizen_name=current_user.name,
         citizen_phone=current_user.phone or complaint.citizen_phone,
+        citizen_language=_normalize_language(complaint.citizen_language),
+        image_path=complaint.image_path,
+        audio_path=complaint.audio_path,
         priority=priority_level,
         ai_score=priority_result["score"],
         urgency_score=priority_result["urgency"],
@@ -191,7 +554,11 @@ def create_complaint(
         ai_entities=json.dumps(ai_meta),
         status=ComplaintStatus.OPEN,
         input_mode=input_mode,
-        citizen_update="Complaint received and queued for leader review.",
+        citizen_update=_build_citizen_update(
+            status="open",
+            ticket_id=ticket_id,
+            language=_normalize_language(complaint.citizen_language),
+        ),
     )
 
     db.add(db_complaint)
@@ -231,11 +598,35 @@ async def extract_complaint_image(
 ):
     """Extract structured complaint details from an issue photo."""
     image_bytes = await image.read()
-    return complaint_extraction_service.extract_from_image(
+    media_path = _save_citizen_media(image_bytes, image.filename or "image.jpg", "image")
+    payload = complaint_extraction_service.extract_from_image(
         image_bytes=image_bytes,
         caption=caption or None,
         ward_hint=ward,
+        image_name=image.filename,
     )
+    payload["source_media_path"] = media_path
+    payload["source_media_type"] = "image"
+    return payload
+
+
+@router.post("/extract/image-only")
+async def extract_problem_from_image_only(
+    image: UploadFile = File(...),
+    ward: Optional[str] = Form(None),
+):
+    """Generate complaint description directly from image, without text caption."""
+    image_bytes = await image.read()
+    media_path = _save_citizen_media(image_bytes, image.filename or "image.jpg", "image")
+    payload = complaint_extraction_service.extract_from_image(
+        image_bytes=image_bytes,
+        caption=None,
+        ward_hint=ward,
+        image_name=image.filename,
+    )
+    payload["source_media_path"] = media_path
+    payload["source_media_type"] = "image"
+    return payload
 
 
 @router.post("/extract/voice")
@@ -247,11 +638,15 @@ async def extract_complaint_voice(
     audio_bytes = await audio.read()
     ext = audio.filename.split(".")[-1] if audio.filename and "." in audio.filename else "ogg"
     try:
-        return complaint_extraction_service.extract_from_voice(
+        media_path = _save_citizen_media(audio_bytes, audio.filename or f"voice.{ext}", "audio")
+        payload = complaint_extraction_service.extract_from_voice(
             audio_bytes=audio_bytes,
             file_extension=ext,
             ward_hint=ward,
         )
+        payload["source_media_path"] = media_path
+        payload["source_media_type"] = "audio"
+        return payload
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -267,6 +662,8 @@ def list_complaints(
     db: Session = Depends(get_db),
 ):
     """List complaints with optional filters."""
+    _apply_starvation_escalation(db)
+
     query = db.query(Complaint)
 
     if ward:
@@ -284,7 +681,7 @@ def list_complaints(
     return {
         "total": total,
         "complaints": [
-            {
+            (lambda eff: {
                 "id": c.id,
                 "ticket_id": c.ticket_id,
                 "title": c.title,
@@ -293,6 +690,10 @@ def list_complaints(
                 "ward": c.ward,
                 "priority": c.priority.value if c.priority else "P3",
                 "ai_score": c.ai_score,
+                "effective_ai_score": eff[0],
+                "effective_priority": eff[1],
+                "starvation_bonus": eff[2],
+                "unresponded_hours": round(eff[3], 1),
                 "status": c.status.value if c.status else "open",
                 "input_mode": c.input_mode.value if c.input_mode else "text",
                 "assigned_to": c.assigned_to,
@@ -301,9 +702,16 @@ def list_complaints(
                 "authority_response": c.authority_response,
                 "leader_note": c.leader_note,
                 "citizen_update": c.citizen_update,
+                "citizen_language": c.citizen_language,
+                "image_path": c.image_path,
+                "audio_path": c.audio_path,
+                "verification_status": c.verification_status,
+                "verification_score": c.verification_score,
+                "verification_confidence": c.verification_confidence,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
+                "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
                 "rating": c.rating,
-            }
+            })(_effective_priority_snapshot(c))
             for c in complaints
         ],
     }
@@ -316,6 +724,8 @@ def list_my_complaints(
     current_user: User = Depends(get_current_user),
 ):
     """Get complaints filed by currently authenticated citizen."""
+    _apply_starvation_escalation(db)
+
     complaints = (
         db.query(Complaint)
         .filter(Complaint.citizen_user_id == current_user.id)
@@ -334,12 +744,77 @@ def list_my_complaints(
                 "ward": c.ward,
                 "priority": c.priority.value if c.priority else "P3",
                 "status": c.status.value if c.status else "open",
+                "effective_priority": _effective_priority_snapshot(c)[1],
+                "effective_ai_score": _effective_priority_snapshot(c)[0],
                 "assigned_authority": c.assigned_authority,
                 "authority_email": c.authority_email,
                 "authority_response": c.authority_response,
                 "citizen_update": c.citizen_update,
+                "citizen_language": c.citizen_language,
+                "image_path": c.image_path,
+                "audio_path": c.audio_path,
+                "verification_status": c.verification_status,
+                "verification_score": c.verification_score,
                 "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in complaints
+        ],
+    }
+
+
+@router.get("/authority/my")
+def list_authority_complaints(
+    status: Optional[str] = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_authority: User = Depends(get_current_authority),
+):
+    """Get complaints assigned to currently authenticated authority."""
+    _apply_starvation_escalation(db)
+
+    user_email = (current_authority.email or "").strip().lower()
+    user_name = (current_authority.name or "").strip().lower()
+
+    query = db.query(Complaint).filter(
+        or_(
+            func.lower(func.coalesce(Complaint.authority_email, "")) == user_email,
+            func.lower(func.coalesce(Complaint.assigned_authority, "")) == user_name,
+            func.lower(func.coalesce(Complaint.assigned_to, "")) == user_name,
+        )
+    )
+    if status:
+        query = query.filter(Complaint.status == status)
+
+    complaints = query.order_by(desc(Complaint.created_at)).limit(max(1, min(limit, 250))).all()
+
+    return {
+        "total": len(complaints),
+        "complaints": [
+            {
+                "ticket_id": c.ticket_id,
+                "title": c.title,
+                "description": c.description,
+                "category": c.category,
+                "ward": c.ward,
+                "priority": c.priority.value if c.priority else "P3",
+                "effective_priority": _effective_priority_snapshot(c)[1],
+                "effective_ai_score": _effective_priority_snapshot(c)[0],
+                "status": c.status.value if c.status else "open",
+                "assigned_authority": c.assigned_authority,
+                "authority_email": c.authority_email,
+                "leader_note": c.leader_note,
+                "authority_response": c.authority_response,
+                "citizen_update": c.citizen_update,
+                "image_path": c.image_path,
+                "audio_path": c.audio_path,
+                "verification_status": c.verification_status,
+                "verification_score": c.verification_score,
+                "verification_confidence": c.verification_confidence,
+                "before_photo": c.before_photo,
+                "after_photo": c.after_photo,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
             }
             for c in complaints
         ],
@@ -353,6 +828,8 @@ def get_complaint(ticket_id: str, db: Session = Depends(get_db)):
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
 
+    eff_score, eff_priority, starvation_bonus, unresponded_hours = _effective_priority_snapshot(complaint)
+
     return {
         "id": complaint.id,
         "ticket_id": complaint.ticket_id,
@@ -363,6 +840,10 @@ def get_complaint(ticket_id: str, db: Session = Depends(get_db)):
         "location": complaint.location,
         "priority": complaint.priority.value,
         "ai_score": complaint.ai_score,
+        "effective_ai_score": eff_score,
+        "effective_priority": eff_priority,
+        "starvation_bonus": starvation_bonus,
+        "unresponded_hours": round(unresponded_hours, 1),
         "urgency_score": complaint.urgency_score,
         "impact_score": complaint.impact_score,
         "recurrence_score": complaint.recurrence_score,
@@ -377,6 +858,16 @@ def get_complaint(ticket_id: str, db: Session = Depends(get_db)):
         "leader_note": complaint.leader_note,
         "authority_response": complaint.authority_response,
         "citizen_update": complaint.citizen_update,
+        "citizen_language": complaint.citizen_language,
+        "image_path": complaint.image_path,
+        "audio_path": complaint.audio_path,
+        "before_photo": complaint.before_photo,
+        "after_photo": complaint.after_photo,
+        "verification_status": complaint.verification_status,
+        "verification_score": complaint.verification_score,
+        "verification_confidence": complaint.verification_confidence,
+        "before_meta": json.loads(complaint.before_meta) if complaint.before_meta else None,
+        "after_meta": json.loads(complaint.after_meta) if complaint.after_meta else None,
         "created_at": complaint.created_at.isoformat() if complaint.created_at else None,
         "resolved_at": complaint.resolved_at.isoformat() if complaint.resolved_at else None,
         "rating": complaint.rating,
@@ -429,7 +920,7 @@ def leader_assign_authority(
         complaint.assigned_to = req.assigned_team.strip()
     complaint.leader_note = req.leader_note or complaint.leader_note
     complaint.status = ComplaintStatus.ASSIGNED
-    complaint.citizen_update = f"Assigned to {complaint.assigned_authority}. Field team will start work soon."
+    _safe_notify_citizen(complaint, "assigned", req.leader_note)
 
     _log_activity(
         db,
@@ -457,29 +948,41 @@ def authority_respond(
     ticket_id: str,
     req: AuthorityResponseRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_leader),
+    current_actor: User = Depends(get_current_leader_or_authority),
 ):
     """Record authority response and move complaint to in-progress or verification."""
     complaint = db.query(Complaint).filter(Complaint.ticket_id == ticket_id).first()
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
 
-    complaint.authority_response = req.response
-    complaint.assigned_authority = req.authority_name.strip()
+    _ensure_authority_access(complaint, current_actor)
+
+    response_text = req.response.strip()
+    if not response_text:
+        raise HTTPException(status_code=400, detail="Response message cannot be empty")
+
+    authority_name = (req.authority_name or current_actor.name or complaint.assigned_authority or "Authority").strip()
+    if req.mark_verification_ready and not complaint.after_photo:
+        raise HTTPException(status_code=400, detail="Upload after evidence before marking verification ready")
+
+    complaint.authority_response = response_text
+    complaint.assigned_authority = authority_name
+    if (current_actor.role or "").lower() == "authority" and not complaint.authority_email:
+        complaint.authority_email = current_actor.email
     complaint.status = ComplaintStatus.VERIFICATION if req.mark_verification_ready else ComplaintStatus.IN_PROGRESS
-    complaint.citizen_update = (
-        "Authority completed work and sent response. Leader verification pending."
-        if req.mark_verification_ready
-        else "Authority has acknowledged and started work on your complaint."
+    _safe_notify_citizen(
+        complaint,
+        "verification" if req.mark_verification_ready else "in_progress",
+        response_text,
     )
 
     _log_activity(
         db,
         complaint,
         actor_role="authority",
-        actor_name=req.authority_name,
+        actor_name=authority_name,
         action="authority_response",
-        note=req.response,
+        note=response_text,
     )
     db.commit()
     db.refresh(complaint)
@@ -488,6 +991,100 @@ def authority_respond(
         "ticket_id": complaint.ticket_id,
         "status": complaint.status.value,
         "authority_response": complaint.authority_response,
+        "citizen_update": complaint.citizen_update,
+    }
+
+
+@router.post("/{ticket_id}/authority/acknowledge")
+def authority_acknowledge(
+    ticket_id: str,
+    req: AuthorityAcknowledgeRequest,
+    db: Session = Depends(get_db),
+    current_authority: User = Depends(get_current_authority),
+):
+    """Authority acknowledges assigned complaint and starts field operation."""
+    complaint = db.query(Complaint).filter(Complaint.ticket_id == ticket_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    _ensure_authority_access(complaint, current_authority)
+
+    complaint.status = ComplaintStatus.IN_PROGRESS
+    if not complaint.assigned_authority:
+        complaint.assigned_authority = current_authority.name
+    if not complaint.authority_email:
+        complaint.authority_email = current_authority.email
+    if req.note:
+        complaint.authority_response = req.note
+
+    _safe_notify_citizen(complaint, "in_progress", req.note or "Authority team acknowledged and mobilized.")
+    _log_activity(
+        db,
+        complaint,
+        actor_role="authority",
+        actor_name=current_authority.name,
+        action="authority_acknowledged",
+        note=req.note or "Authority acknowledged assignment.",
+    )
+    db.commit()
+
+    return {
+        "ticket_id": complaint.ticket_id,
+        "status": complaint.status.value,
+        "authority_response": complaint.authority_response,
+        "citizen_update": complaint.citizen_update,
+    }
+
+
+@router.post("/{ticket_id}/authority/message-leader")
+def authority_message_leader(
+    ticket_id: str,
+    req: AuthorityLeaderMessageRequest,
+    db: Session = Depends(get_db),
+    current_authority: User = Depends(get_current_authority),
+):
+    """Authority sends structured update to leader and optionally requests verification."""
+    complaint = db.query(Complaint).filter(Complaint.ticket_id == ticket_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    _ensure_authority_access(complaint, current_authority)
+
+    message = req.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    if req.mark_verification_ready and not complaint.after_photo:
+        raise HTTPException(status_code=400, detail="Upload after evidence before requesting verification")
+
+    complaint.authority_response = message
+    if req.blocker:
+        complaint.status = ComplaintStatus.ASSIGNED
+        complaint.leader_note = f"Blocker from authority ({current_authority.name}): {message}"
+    elif req.mark_verification_ready:
+        complaint.status = ComplaintStatus.VERIFICATION
+    else:
+        complaint.status = ComplaintStatus.IN_PROGRESS
+
+    _safe_notify_citizen(
+        complaint,
+        "verification" if req.mark_verification_ready else "in_progress",
+        message,
+    )
+    _log_activity(
+        db,
+        complaint,
+        actor_role="authority",
+        actor_name=current_authority.name,
+        action="authority_message_to_leader",
+        note=message,
+    )
+    db.commit()
+
+    return {
+        "ticket_id": complaint.ticket_id,
+        "status": complaint.status.value,
+        "authority_response": complaint.authority_response,
+        "leader_note": complaint.leader_note,
         "citizen_update": complaint.citizen_update,
     }
 
@@ -568,14 +1165,7 @@ def leader_update_status(
     complaint.status = new_status
     if req.leader_note:
         complaint.leader_note = req.leader_note
-
-    status_message = {
-        ComplaintStatus.ASSIGNED: "Leader assigned your complaint to the relevant authority.",
-        ComplaintStatus.IN_PROGRESS: "Work is in progress on your complaint.",
-        ComplaintStatus.VERIFICATION: "Work reported complete. Leader verification in progress.",
-        ComplaintStatus.OPEN: "Complaint is open and under review.",
-    }
-    complaint.citizen_update = status_message.get(new_status, "Complaint status updated.")
+    _safe_notify_citizen(complaint, new_status.value, req.leader_note)
 
     _log_activity(
         db,
@@ -620,9 +1210,20 @@ def leader_resolve_complaint(
     complaint.resolved_at = datetime.now()
     complaint.verification_status = "verified"
     complaint.leader_note = req.resolution_note
-    complaint.citizen_update = req.citizen_update or (
-        f"Leader verified resolution. Ticket {complaint.ticket_id} is now marked as solved."
-    )
+    if req.citizen_update:
+        complaint.citizen_update = req.citizen_update
+        if complaint.citizen_phone:
+            try:
+                whatsapp_bot.send_status_update(
+                    phone=complaint.citizen_phone,
+                    ticket_id=complaint.ticket_id,
+                    status="resolved",
+                    message=req.citizen_update,
+                )
+            except Exception:
+                pass
+    else:
+        _safe_notify_citizen(complaint, "resolved", req.resolution_note)
 
     _log_activity(
         db,
@@ -640,4 +1241,269 @@ def leader_resolve_complaint(
         "status": complaint.status.value,
         "resolved_at": complaint.resolved_at.isoformat() if complaint.resolved_at else None,
         "citizen_update": complaint.citizen_update,
+    }
+
+
+@router.post("/{ticket_id}/verification/before")
+async def upload_before_photo(
+    ticket_id: str,
+    photo: UploadFile = File(...),
+    latitude: Optional[float] = Form(None),
+    longitude: Optional[float] = Form(None),
+    captured_at: Optional[str] = Form(None),
+    note: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_actor: User = Depends(get_current_leader_or_authority),
+):
+    complaint = db.query(Complaint).filter(Complaint.ticket_id == ticket_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    _ensure_authority_access(complaint, current_actor)
+
+    photo_bytes = await photo.read()
+    if not photo_bytes:
+        raise HTTPException(status_code=400, detail="Before photo is empty")
+
+    rel_path = _save_verification_photo(ticket_id, "before", photo_bytes, photo.filename or "before.jpg")
+    complaint.before_photo = rel_path
+    complaint.before_meta = json.dumps(
+        {
+            "latitude": latitude,
+            "longitude": longitude,
+            "captured_at": captured_at,
+            "uploaded_at": datetime.now().isoformat(),
+            "uploaded_by": current_actor.name,
+            "uploaded_by_role": (current_actor.role or "citizen"),
+            "note": note,
+        }
+    )
+    complaint.verification_status = complaint.verification_status or "pending"
+
+    _log_activity(
+        db,
+        complaint,
+        actor_role="leader" if (current_actor.role or "citizen") == "leader" else "authority",
+        actor_name=current_actor.name,
+        action="verification_before_uploaded",
+        note=note or "Before image uploaded for proof-of-work.",
+    )
+    db.commit()
+
+    return {
+        "ticket_id": complaint.ticket_id,
+        "stage": "before",
+        "before_photo": complaint.before_photo,
+        "verification_status": complaint.verification_status,
+    }
+
+
+@router.post("/{ticket_id}/verification/after")
+async def upload_after_photo(
+    ticket_id: str,
+    photo: UploadFile = File(...),
+    latitude: Optional[float] = Form(None),
+    longitude: Optional[float] = Form(None),
+    captured_at: Optional[str] = Form(None),
+    note: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_actor: User = Depends(get_current_leader_or_authority),
+):
+    complaint = db.query(Complaint).filter(Complaint.ticket_id == ticket_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    _ensure_authority_access(complaint, current_actor)
+
+    photo_bytes = await photo.read()
+    if not photo_bytes:
+        raise HTTPException(status_code=400, detail="After photo is empty")
+
+    rel_path = _save_verification_photo(ticket_id, "after", photo_bytes, photo.filename or "after.jpg")
+    complaint.after_photo = rel_path
+    complaint.after_meta = json.dumps(
+        {
+            "latitude": latitude,
+            "longitude": longitude,
+            "captured_at": captured_at,
+            "uploaded_at": datetime.now().isoformat(),
+            "uploaded_by": current_actor.name,
+            "uploaded_by_role": (current_actor.role or "citizen"),
+            "note": note,
+        }
+    )
+    complaint.verification_status = "pending_review"
+
+    _log_activity(
+        db,
+        complaint,
+        actor_role="leader" if (current_actor.role or "citizen") == "leader" else "authority",
+        actor_name=current_actor.name,
+        action="verification_after_uploaded",
+        note=note or "After image uploaded for proof-of-work.",
+    )
+    db.commit()
+
+    return {
+        "ticket_id": complaint.ticket_id,
+        "stage": "after",
+        "after_photo": complaint.after_photo,
+        "verification_status": complaint.verification_status,
+    }
+
+
+@router.post("/{ticket_id}/verification/run")
+def run_verification(
+    ticket_id: str,
+    db: Session = Depends(get_db),
+    current_actor: User = Depends(get_current_leader_or_authority),
+):
+    complaint = db.query(Complaint).filter(Complaint.ticket_id == ticket_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    _ensure_authority_access(complaint, current_actor)
+    if not complaint.before_photo or not complaint.after_photo:
+        raise HTTPException(status_code=400, detail="Upload both before and after photos before running verification")
+
+    if not os.path.exists(complaint.before_photo) or not os.path.exists(complaint.after_photo):
+        raise HTTPException(status_code=400, detail="Verification photos are missing from storage")
+
+    try:
+        result = _verification_summary(complaint)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    complaint.verification_status = result["status"]
+    complaint.verification_score = result["verification_score"]
+    complaint.verification_confidence = result["verification_confidence"]
+
+    if complaint.verification_status == "verified":
+        complaint.status = ComplaintStatus.VERIFICATION
+        _safe_notify_citizen(
+            complaint,
+            "verification",
+            f"AI verification score {complaint.verification_score}/100.",
+        )
+    else:
+        complaint.status = ComplaintStatus.IN_PROGRESS
+        _safe_notify_citizen(
+            complaint,
+            "flagged",
+            "Verification flagged; authority must rework and re-upload evidence.",
+        )
+
+    _log_activity(
+        db,
+        complaint,
+        actor_role="leader" if (current_actor.role or "citizen") == "leader" else "authority",
+        actor_name=current_actor.name,
+        action="ai_verification_completed",
+        note=f"status={complaint.verification_status}; score={complaint.verification_score}",
+    )
+    db.commit()
+
+    return {
+        "ticket_id": complaint.ticket_id,
+        "verification_status": complaint.verification_status,
+        "verification_score": complaint.verification_score,
+        "verification_confidence": complaint.verification_confidence,
+        "components": result["components"],
+        "reasons": result["reasons"],
+    }
+
+
+@router.get("/{ticket_id}/verification")
+def get_verification_details(
+    ticket_id: str,
+    db: Session = Depends(get_db),
+    current_actor: User = Depends(get_current_leader_or_authority),
+):
+    complaint = db.query(Complaint).filter(Complaint.ticket_id == ticket_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    _ensure_authority_access(complaint, current_actor)
+
+    return {
+        "ticket_id": complaint.ticket_id,
+        "before_photo": complaint.before_photo,
+        "after_photo": complaint.after_photo,
+        "before_meta": json.loads(complaint.before_meta) if complaint.before_meta else None,
+        "after_meta": json.loads(complaint.after_meta) if complaint.after_meta else None,
+        "verification_status": complaint.verification_status,
+        "verification_score": complaint.verification_score,
+        "verification_confidence": complaint.verification_confidence,
+    }
+
+
+@router.get("/incidents/summary")
+def incident_summary(
+    window_hours: int = 168,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_leader),
+):
+    _apply_starvation_escalation(db)
+
+    since = datetime.now() - timedelta(hours=max(24, min(window_hours, 24 * 30)))
+    complaints = (
+        db.query(Complaint)
+        .filter(Complaint.created_at >= since)
+        .filter(Complaint.status != ComplaintStatus.RESOLVED)
+        .order_by(desc(Complaint.ai_score))
+        .all()
+    )
+
+    clusters = {}
+    for complaint in complaints:
+        key = _incident_key(complaint)
+        if key not in clusters:
+            clusters[key] = {
+                "ward": complaint.ward,
+                "category": complaint.category,
+                "complaint_count": 0,
+                "max_ai_score": 0.0,
+                "tickets": [],
+                "p0_count": 0,
+            }
+
+        cluster = clusters[key]
+        cluster["complaint_count"] += 1
+        cluster["max_ai_score"] = max(cluster["max_ai_score"], float(complaint.ai_score or 0.0))
+        cluster["tickets"].append(complaint.ticket_id)
+        if complaint.priority == PriorityLevel.P0:
+            cluster["p0_count"] += 1
+
+    ranked = []
+    for key, cluster in clusters.items():
+        risk_score = min(
+            100.0,
+            round(
+                (cluster["max_ai_score"] * 0.55)
+                + (cluster["complaint_count"] * 8.5)
+                + (18.0 if cluster["p0_count"] > 0 else 0.0),
+                1,
+            ),
+        )
+        incident_id = f"INC-{abs(hash(key)) % 100000:05d}"
+        ranked.append(
+            {
+                "incident_id": incident_id,
+                "ward": cluster["ward"],
+                "category": cluster["category"],
+                "complaint_count": cluster["complaint_count"],
+                "p0_count": cluster["p0_count"],
+                "risk_score": risk_score,
+                "severity": "critical" if risk_score >= 85 else "high" if risk_score >= 70 else "medium",
+                "tickets": cluster["tickets"][:8],
+            }
+        )
+
+    ranked.sort(key=lambda item: (item["risk_score"], item["complaint_count"]), reverse=True)
+    return {
+        "window_hours": window_hours,
+        "total_active_complaints": len(complaints),
+        "cluster_count": len(ranked),
+        "incidents": ranked[: max(1, min(limit, 100))],
     }

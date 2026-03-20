@@ -5,6 +5,7 @@ AI-powered citizen governance platform backend.
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import os
 
 from config import API_PREFIX, UPLOAD_DIR
@@ -31,6 +32,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Expose uploaded media files for leader/authority review.
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # Import and register routers
 from routers import complaints, nlp, priority, sentiment, vision, speech, reports, dashboard, whatsapp, auth

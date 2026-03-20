@@ -116,7 +116,14 @@ export default function CitizenPortal() {
   const [liveSpeechSupported, setLiveSpeechSupported] = useState(false);
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceTranscribeError, setVoiceTranscribeError] = useState('');
+  const [voiceFile, setVoiceFile] = useState<File | null>(null);
+  const [voiceFileProcessing, setVoiceFileProcessing] = useState(false);
+  const [voiceFileMessage, setVoiceFileMessage] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoExtractLoading, setPhotoExtractLoading] = useState(false);
+  const [photoExtractMessage, setPhotoExtractMessage] = useState('');
+  const [photoMediaPath, setPhotoMediaPath] = useState('');
+  const [voiceMediaPath, setVoiceMediaPath] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [inputProcessing, setInputProcessing] = useState(false);
@@ -277,7 +284,7 @@ export default function CitizenPortal() {
         ? { name: authName.trim(), email: authEmail.trim(), phone: authPhone.trim() || null, password: authPassword }
         : { email: authEmail.trim(), password: authPassword };
 
-      const res = await fetch(`${API_BASE}${endpoint}`, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -307,6 +314,106 @@ export default function CitizenPortal() {
       return payload?.detail || 'Request failed';
     } catch {
       return 'Request failed';
+    }
+  };
+
+  const extractProblemFromImageOnly = async () => {
+    if (!photoFile) {
+      setPhotoExtractMessage('Please upload a photo first.');
+      return;
+    }
+
+    setPhotoExtractLoading(true);
+    setPhotoExtractMessage('');
+
+    try {
+      const imageData = new FormData();
+      imageData.append('image', photoFile);
+      imageData.append('ward', ward || 'Ward 1');
+
+      const res = await fetch(`${API_BASE}/api/complaints/extract/image-only`, {
+        method: 'POST',
+        body: imageData,
+      });
+
+      if (!res.ok) {
+        setPhotoExtractMessage(`Could not extract description: ${await parseErrorMessage(res)}`);
+        return;
+      }
+
+      const payload = await res.json();
+      const generatedDescription = String(
+        payload?.image_problem_description || payload?.description || ''
+      ).trim();
+
+      if (payload?.source_media_path) {
+        setPhotoMediaPath(String(payload.source_media_path));
+      }
+
+      if (payload?.category) {
+        setCategory(String(payload.category));
+      }
+
+      if (generatedDescription) {
+        setDescription(generatedDescription);
+        setPhotoExtractMessage('AI extracted problem description from photo. You can edit it before submit.');
+      } else {
+        setPhotoExtractMessage('Image analyzed, but description could not be generated. Please add details manually.');
+      }
+    } catch {
+      setPhotoExtractMessage('Failed to contact image extraction service.');
+    } finally {
+      setPhotoExtractLoading(false);
+    }
+  };
+
+  const extractFromVoiceUpload = async () => {
+    if (!voiceFile) {
+      setVoiceFileMessage('Please choose an audio file first.');
+      return;
+    }
+
+    setVoiceFileProcessing(true);
+    setVoiceFileMessage('');
+
+    try {
+      const form = new FormData();
+      form.append('audio', voiceFile);
+      form.append('ward', ward || 'Ward 1');
+
+      const res = await fetch(`${API_BASE}/api/complaints/extract/voice`, {
+        method: 'POST',
+        body: form,
+      });
+
+      if (!res.ok) {
+        setVoiceFileMessage(`Could not transcribe voice upload: ${await parseErrorMessage(res)}`);
+        return;
+      }
+
+      const payload = await res.json();
+      const transcript = String(payload?.transcript || payload?.description || '').trim();
+      if (transcript) {
+        setVoiceTranscript(transcript);
+        setVoiceLanguage(payload?.speech?.language || 'Uploaded Audio');
+        if (!description.trim()) {
+          setDescription(transcript);
+        }
+      }
+
+      if (payload?.category && !category) {
+        setCategory(String(payload.category));
+      }
+
+      if (payload?.source_media_path) {
+        setVoiceMediaPath(String(payload.source_media_path));
+      }
+
+      setVoiceFileMessage('Audio uploaded and transcribed. You can edit details before submit.');
+    } catch {
+      setVoiceFileMessage('Failed to contact voice extraction service.');
+    } finally {
+      setVoiceFileProcessing(false);
     }
   };
 
@@ -390,9 +497,37 @@ export default function CitizenPortal() {
     try {
       let finalDescription = description.trim();
       let finalCategory = category;
+      let finalImagePath = photoMediaPath;
+      let finalAudioPath = voiceMediaPath;
 
       if (inputMode === 'voice') {
         let transcriptText = voiceTranscript.trim();
+
+        if (voiceFile && (!transcriptText || !finalAudioPath)) {
+          const form = new FormData();
+          form.append('audio', voiceFile);
+          form.append('ward', ward || 'Ward 1');
+
+          const voiceRes = await fetch(`${API_BASE}/api/complaints/extract/voice`, {
+            method: 'POST',
+            body: form,
+          });
+
+          if (!voiceRes.ok) {
+            throw new Error(await parseErrorMessage(voiceRes));
+          }
+
+          const voiceExtraction = await voiceRes.json();
+          transcriptText = String(voiceExtraction?.transcript || voiceExtraction?.description || '').trim();
+          if (voiceExtraction?.source_media_path) {
+            finalAudioPath = String(voiceExtraction.source_media_path);
+            setVoiceMediaPath(finalAudioPath);
+          }
+          if (!finalCategory && voiceExtraction?.category) {
+            finalCategory = String(voiceExtraction.category);
+          }
+        }
+
         if (!transcriptText && !finalDescription) {
           alert('Please use live mic dictation, or type details in additional details.');
           return;
@@ -411,29 +546,37 @@ export default function CitizenPortal() {
           return;
         }
 
-        const imageData = new FormData();
-        imageData.append('image', photoFile);
-        imageData.append('ward', ward || 'Ward 1');
+        if (!finalCategory || !finalDescription) {
+          const imageData = new FormData();
+          imageData.append('image', photoFile);
+          imageData.append('ward', ward || 'Ward 1');
 
-        const detectRes = await fetch(`${API_BASE}/api/complaints/extract/image`, {
-          method: 'POST',
-          body: imageData,
-        });
+          const detectRes = await fetch(`${API_BASE}/api/complaints/extract/image`, {
+            method: 'POST',
+            body: imageData,
+          });
 
-        if (!detectRes.ok) {
-          throw new Error(await parseErrorMessage(detectRes));
-        }
+          if (!detectRes.ok) {
+            throw new Error(await parseErrorMessage(detectRes));
+          }
 
-        const detection = await detectRes.json();
-        if (!finalCategory && detection?.category) {
-          finalCategory = String(detection.category);
-        }
+          const detection = await detectRes.json();
+          if (!finalCategory && detection?.category) {
+            finalCategory = String(detection.category);
+          }
 
-        if (!finalDescription) {
-          finalDescription = String(
-            detection?.description
-              || `Photo report: ${detection?.category || 'infrastructure issue'} detected.`
-          ).trim();
+          if (detection?.source_media_path) {
+            finalImagePath = String(detection.source_media_path);
+            setPhotoMediaPath(finalImagePath);
+          }
+
+          if (!finalDescription) {
+            finalDescription = String(
+              detection?.image_problem_description
+                || detection?.description
+                || `Photo report: ${detection?.category || 'infrastructure issue'} detected.`
+            ).trim();
+          }
         }
       }
 
@@ -460,6 +603,8 @@ export default function CitizenPortal() {
           ward,
           citizen_name: currentUser.name,
           citizen_phone: contactPhone || currentUser.phone || null,
+          image_path: inputMode === 'photo' ? (finalImagePath || null) : null,
+          audio_path: inputMode === 'voice' ? (finalAudioPath || null) : null,
           input_mode: inputMode,
         }),
       });
@@ -476,7 +621,12 @@ export default function CitizenPortal() {
         setVoiceLanguage('');
         setVoiceListening(false);
         setVoiceTranscribeError('');
+        setVoiceFile(null);
+        setVoiceFileMessage('');
+        setVoiceMediaPath('');
         setPhotoFile(null);
+        setPhotoMediaPath('');
+        setPhotoExtractMessage('');
       } else {
         const detail = await parseErrorMessage(res);
         if (res.status === 401) {
@@ -663,7 +813,12 @@ export default function CitizenPortal() {
                             setVoiceLanguage('');
                             setVoiceListening(false);
                             setVoiceTranscribeError('');
+                            setVoiceFile(null);
+                            setVoiceFileMessage('');
+                            setVoiceMediaPath('');
                             setPhotoFile(null);
+                            setPhotoMediaPath('');
+                            setPhotoExtractMessage('');
                           }}
                           style={{
                             flex: 1,
@@ -773,6 +928,33 @@ export default function CitizenPortal() {
                           <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: 4 }}>
                             Use Start Live Mic to dictate your complaint, then Stop and submit.
                           </div>
+
+                          <div style={{ marginTop: 12, borderTop: '1px solid var(--border-subtle)', paddingTop: 10 }}>
+                            <label className="form-label">Or Upload Voice File</label>
+                            <input
+                              type="file"
+                              accept="audio/*"
+                              onChange={e => {
+                                setVoiceFile(e.target.files?.[0] || null);
+                                setVoiceFileMessage('');
+                              }}
+                              style={{ width: '100%' }}
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              onClick={extractFromVoiceUpload}
+                              disabled={!voiceFile || voiceFileProcessing || submitting || inputProcessing}
+                              style={{ marginTop: 10 }}
+                            >
+                              {voiceFileProcessing ? '⏳ Transcribing uploaded audio...' : '🧠 Extract from Uploaded Audio'}
+                            </button>
+                            {voiceFileMessage && (
+                              <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                                {voiceFileMessage}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
 
@@ -790,18 +972,40 @@ export default function CitizenPortal() {
                           <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: 4 }}>
                             {photoFile ? `Selected: ${photoFile.name}` : 'Photo detection will suggest category and severity automatically.'}
                           </div>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={extractProblemFromImageOnly}
+                            disabled={!photoFile || photoExtractLoading || submitting || inputProcessing}
+                            style={{ marginTop: 10 }}
+                          >
+                            {photoExtractLoading ? '⏳ Extracting from image...' : '🧠 Extract Problem Description from Photo'}
+                          </button>
+                          {photoExtractMessage && (
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 8 }}>
+                              {photoExtractMessage}
+                            </div>
+                          )}
                         </div>
                       )}
 
                       <div className="form-group">
                         <label className="form-label">
-                          {inputMode === 'text' ? 'Describe the Issue' : 'Additional Details (Optional)'}
+                          {inputMode === 'text'
+                            ? 'Describe the Issue'
+                            : inputMode === 'photo'
+                              ? 'Problem Description (Auto-generated from image, editable)'
+                              : 'Additional Details (Optional)'}
                         </label>
                         <textarea
                           className="form-textarea"
                           value={description}
                           onChange={e => setDescription(e.target.value)}
-                          placeholder={inputMode === 'text' ? 'Describe the problem in detail...' : 'Add landmarks, timings, or extra context...'}
+                          placeholder={inputMode === 'text'
+                            ? 'Describe the problem in detail...'
+                            : inputMode === 'photo'
+                              ? 'Click "Extract Problem Description from Photo" to auto-fill this.'
+                              : 'Add landmarks, timings, or extra context...'}
                           required={inputMode === 'text'}
                         />
                       </div>

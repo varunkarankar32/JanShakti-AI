@@ -1,12 +1,11 @@
 """
-Vision Service — YOLOv8-based Issue Detection in Photos
-Detects: potholes, road damage, garbage dumps, broken infrastructure, water leaks, etc.
-Falls back to basic analysis if no trained model is available.
+Vision Service — YOLOv8-based issue detection in photos.
+Detects civic infrastructure problems and falls back to lightweight heuristics
+when a specialized model is unavailable.
 """
 
 import os
-import json
-from typing import Dict, List
+from typing import Dict, Optional
 from PIL import Image
 import io
 import re
@@ -50,10 +49,37 @@ ISSUE_KEYWORDS = {
     "water",
     "drain",
     "streetlight",
+    "traffic_light",
+    "light",
     "wall",
     "tree",
     "damage",
     "infrastructure",
+}
+
+GENERIC_CLASS_TO_ISSUE = {
+    "traffic_light": "broken_streetlight",
+    "fire_hydrant": "broken_pipe",
+    "potted_plant": "fallen_tree",
+    "trash_can": "garbage_dump",
+    "bench": "damaged_wall",
+}
+
+FILENAME_HINT_TO_ISSUE = {
+    "street": "broken_streetlight",
+    "light": "broken_streetlight",
+    "lamp": "broken_streetlight",
+    "garbage": "garbage_dump",
+    "trash": "garbage_dump",
+    "waste": "garbage_dump",
+    "pipe": "broken_pipe",
+    "leak": "broken_pipe",
+    "water": "waterlogging",
+    "drain": "waterlogging",
+    "tree": "fallen_tree",
+    "wall": "damaged_wall",
+    "road": "road_damage",
+    "pothole": "pothole",
 }
 
 
@@ -83,14 +109,14 @@ class VisionService:
 
         print("[Vision] YOLO model unavailable — using simulated detection")
 
-    def detect(self, image_bytes: bytes) -> Dict:
+    def detect(self, image_bytes: bytes, image_name: Optional[str] = None) -> Dict:
         """
         Run object detection on an image.
         Returns: {detections, category, severity, confidence}
         """
         if self.model:
-            return self._yolo_detect(image_bytes)
-        return self._simulated_detect(image_bytes)
+            return self._yolo_detect(image_bytes, image_name=image_name)
+        return self._simulated_detect(image_bytes, image_name=image_name)
 
     def _normalize_class_name(self, name: str) -> str:
         cleaned = re.sub(r"\s+", "_", str(name).strip().lower())
@@ -100,7 +126,7 @@ class VisionService:
         name = self._normalize_class_name(cls_name)
         return any(token in name for token in ISSUE_KEYWORDS)
 
-    def _yolo_detect(self, image_bytes: bytes) -> Dict:
+    def _yolo_detect(self, image_bytes: bytes, image_name: Optional[str] = None) -> Dict:
         """Run actual YOLOv8 inference."""
         try:
             image = Image.open(io.BytesIO(image_bytes))
@@ -135,7 +161,25 @@ class VisionService:
 
             issue_detections = [d for d in detections if self._is_issue_class(d["class"])]
             if not issue_detections:
-                heuristic = self._simulated_detect(image_bytes)
+                mapped_generic = []
+                for detection in detections:
+                    mapped_cls = GENERIC_CLASS_TO_ISSUE.get(detection["class"])
+                    if not mapped_cls:
+                        continue
+                    mapped = dict(detection)
+                    mapped["class"] = mapped_cls
+                    mapped_generic.append(mapped)
+
+                if mapped_generic:
+                    best = max(mapped_generic, key=lambda d: d["confidence"])
+                    return {
+                        "detections": detections,
+                        "category": best["class"].replace("_", " ").title(),
+                        "severity": self._get_severity(best["confidence"]),
+                        "confidence": best["confidence"],
+                    }
+
+                heuristic = self._simulated_detect(image_bytes, image_name=image_name)
                 heuristic["detections"] = detections + heuristic.get("detections", [])
                 return heuristic
 
@@ -152,13 +196,21 @@ class VisionService:
 
         except Exception as e:
             print(f"[Vision] Detection error: {e}")
-            return self._simulated_detect(image_bytes)
+            return self._simulated_detect(image_bytes, image_name=image_name)
 
-    def _simulated_detect(self, image_bytes: bytes) -> Dict:
+    def _simulated_detect(self, image_bytes: bytes, image_name: Optional[str] = None) -> Dict:
         """Simulated detection for demo purposes."""
         try:
             image = Image.open(io.BytesIO(image_bytes))
             width, height = image.size
+
+            filename_hint_class = None
+            if image_name:
+                lowered_name = str(image_name).lower()
+                for token, cls_name in FILENAME_HINT_TO_ISSUE.items():
+                    if token in lowered_name:
+                        filename_hint_class = cls_name
+                        break
 
             # Basic image analysis
             import numpy as np
@@ -168,6 +220,13 @@ class VisionService:
 
             # Heuristic detection
             detections = []
+            if filename_hint_class:
+                detections.append({
+                    "class": filename_hint_class,
+                    "confidence": 0.74,
+                    "bbox": {"x1": width * 0.2, "y1": height * 0.2, "x2": width * 0.8, "y2": height * 0.8},
+                })
+
             if dark_pixels > 0.15:
                 detections.append({
                     "class": "pothole",

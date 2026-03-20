@@ -7,7 +7,7 @@ Falls back to keyword-based classification if no trained model is available.
 import os
 import re
 import joblib
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from config import CLASSIFIER_MODEL_PATH
 
 
@@ -21,9 +21,9 @@ except ImportError:
 
 # Category keywords for fallback classification
 CATEGORY_KEYWORDS = {
-    "Water Supply": ["water", "pipe", "leak", "tap", "supply", "paani", "nala", "drain", "sewage", "borewell", "tanker", "drinking water", "contamination", "pipeline", "burst"],
+    "Water Supply": ["water", "pipe", "leak", "tap", "supply", "paani", "borewell", "tanker", "drinking water", "contamination", "pipeline", "burst", "water pipe", "water line", "low pressure", "no water"],
     "Roads & Potholes": ["road", "pothole", "crack", "asphalt", "tar", "highway", "footpath", "divider", "speed breaker", "cave-in", "sinkhole", "damaged road"],
-    "Drainage": ["drain", "drainage", "flood", "waterlogging", "clog", "sewer", "overflow", "nallah", "gutter", "manhole", "stagnant"],
+    "Drainage": ["drain", "drainage", "flood", "waterlogging", "water logging", "clog", "sewer", "sewage", "overflow", "overflowing", "nallah", "nala", "gutter", "manhole", "stagnant", "blocked drain", "block drain", "choked drain", "storm water"],
     "Electricity": ["electricity", "power", "streetlight", "light", "wiring", "transformer", "outage", "cutoff", "bijli", "voltage", "pole", "cable", "short circuit"],
     "Garbage & Sanitation": ["garbage", "waste", "trash", "dump", "sanitation", "dirty", "filth", "kachra", "bin", "collection", "smell", "mosquito", "clean", "sweeping"],
     "Safety & Security": ["safety", "crime", "theft", "accident", "fight", "police", "danger", "unsafe", "robbery", "assault", "harassment", "stray dog", "illegal"],
@@ -99,6 +99,8 @@ class NLPService:
         Returns (category, confidence).
         """
         text_lower = text.lower()
+        keyword_scores = self._keyword_scores(text_lower)
+        keyword_label, keyword_confidence = self._best_keyword_guess(keyword_scores)
 
         # Try ML model first
         if self.model and self.vectorizer:
@@ -122,24 +124,60 @@ class NLPService:
                 )
                 label = result["labels"][0]
                 confidence = float(result["scores"][0])
+
+                # Resolve common civic-domain conflicts (for example Drainage vs Water Supply)
+                # by blending zero-shot confidence with explicit keyword signals.
+                if keyword_label:
+                    if label == keyword_label:
+                        return label, max(confidence, keyword_confidence)
+
+                    if keyword_confidence >= 0.72 or confidence < 0.62:
+                        return keyword_label, max(keyword_confidence, confidence * 0.9)
+
                 if confidence >= 0.35:
                     return label, confidence
             except Exception as e:
                 print(f"[NLP] Zero-shot prediction error: {e}")
 
         # Keyword-based fallback
-        scores = {}
+        if keyword_label:
+            return keyword_label, keyword_confidence
+
+        return "Others", 0.3
+
+    def _keyword_scores(self, text_lower: str) -> Dict[str, float]:
+        scores: Dict[str, float] = {}
         for category, keywords in CATEGORY_KEYWORDS.items():
-            score = sum(1 for kw in keywords if kw in text_lower)
+            score = 0.0
+            for kw in keywords:
+                normalized_kw = kw.strip().lower()
+                if not normalized_kw:
+                    continue
+
+                if " " in normalized_kw:
+                    if normalized_kw in text_lower:
+                        score += 1.4
+                    continue
+
+                if re.search(rf"\b{re.escape(normalized_kw)}\b", text_lower):
+                    score += 1.0
+
             if score > 0:
                 scores[category] = score
 
-        if scores:
-            best_cat = max(scores, key=scores.get)  # type: ignore
-            confidence = min(scores[best_cat] / 5.0, 0.95)
-            return best_cat, confidence
+        return scores
 
-        return "Others", 0.3
+    def _best_keyword_guess(self, scores: Dict[str, float]) -> Tuple[Optional[str], float]:
+        if not scores:
+            return None, 0.0
+
+        ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+        best_label, best_score = ranked[0]
+        second_score = ranked[1][1] if len(ranked) > 1 else 0.0
+        margin = max(0.0, best_score - second_score)
+
+        confidence = 0.35 + min(best_score, 6.0) * 0.08 + min(margin, 4.0) * 0.06
+        return best_label, round(min(confidence, 0.95), 4)
 
     def extract_entities(self, text: str) -> Dict:
         """

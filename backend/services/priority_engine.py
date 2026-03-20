@@ -31,6 +31,24 @@ CATEGORY_IMPACT = {
 
 
 class PriorityEngine:
+    def calculate_starvation_bonus(self, unresponded_hours: float = 0.0) -> float:
+        """Escalate stale, unresponded complaints to prevent starvation in queues."""
+        hours = max(0.0, float(unresponded_hours or 0.0))
+        if hours >= 168:
+            return 35.0
+        if hours >= 96:
+            return 26.0
+        if hours >= 48:
+            return 18.0
+        if hours >= 24:
+            return 12.0
+        if hours >= 6:
+            return 6.0
+        return 0.0
+
+    def score_to_priority(self, score: float) -> str:
+        return self._score_to_priority(score)
+
     def calculate_score(
         self,
         text: str,
@@ -38,6 +56,7 @@ class PriorityEngine:
         ward: str,
         recurrence_count: int = 0,
         social_mentions: int = 0,
+        unresponded_hours: float = 0.0,
     ) -> Dict:
         """
         Calculate AI priority score using the weighted formula.
@@ -83,13 +102,14 @@ class PriorityEngine:
             sentiment_score = 20.0
 
         # FINAL SCORE
-        final_score = (
+        base_score = (
             urgency_score * 0.4
             + impact_score * 0.3
             + recurrence_score * 0.2
             + sentiment_score * 0.1
         )
-        final_score = round(final_score, 1)
+        starvation_bonus = self.calculate_starvation_bonus(unresponded_hours)
+        final_score = round(min(100.0, base_score + starvation_bonus), 1)
 
         # Map to priority level
         priority = self._score_to_priority(final_score)
@@ -98,7 +118,8 @@ class PriorityEngine:
         # Build explanation
         explanation = self._build_explanation(
             urgency_level, urgency_score, impact_score, recurrence_count,
-            recurrence_score, social_mentions, sentiment_score, final_score, priority
+            recurrence_score, social_mentions, sentiment_score, final_score, priority,
+            starvation_bonus, unresponded_hours,
         )
 
         return {
@@ -108,6 +129,7 @@ class PriorityEngine:
             "impact": impact_score,
             "recurrence": recurrence_score,
             "sentiment": sentiment_score,
+            "starvation_bonus": starvation_bonus,
             "response_time": priority_info["response"],
             "explanation": explanation,
         }
@@ -123,14 +145,19 @@ class PriorityEngine:
 
     def _build_explanation(
         self, urgency_level, urgency_score, impact_score, recurrence_count,
-        recurrence_score, social_mentions, sentiment_score, final_score, priority
+        recurrence_score, social_mentions, sentiment_score, final_score, priority,
+        starvation_bonus, unresponded_hours,
     ) -> str:
         parts = []
         parts.append(f"Urgency: {urgency_level.upper()} ({urgency_score}/100, weight 40%)")
         parts.append(f"Impact: {impact_score}/100 (weight 30%)")
-        parts.append(f"Recurrence: {recurrence_count} prior reports → {recurrence_score}/100 (weight 20%)")
-        parts.append(f"Social Sentiment: {social_mentions} mentions → {sentiment_score}/100 (weight 10%)")
-        parts.append(f"FINAL: {final_score} → {priority} ({PRIORITY_MAP[priority]['label']})")
+        parts.append(f"Recurrence: {recurrence_count} prior reports -> {recurrence_score}/100 (weight 20%)")
+        parts.append(f"Social Sentiment: {social_mentions} mentions -> {sentiment_score}/100 (weight 10%)")
+        if starvation_bonus > 0:
+            parts.append(
+                f"Starvation Guard: +{starvation_bonus} boost for {round(unresponded_hours, 1)}h unresponded"
+            )
+        parts.append(f"FINAL: {final_score} -> {priority} ({PRIORITY_MAP[priority]['label']})")
         parts.append(f"Target Response: {PRIORITY_MAP[priority]['response']}")
         return " | ".join(parts)
 

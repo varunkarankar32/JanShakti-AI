@@ -1,6 +1,14 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
-from config import DATABASE_URL, DEFAULT_LEADER_NAME, DEFAULT_LEADER_EMAIL, DEFAULT_LEADER_PASSWORD
+from config import (
+    DATABASE_URL,
+    DEFAULT_LEADER_NAME,
+    DEFAULT_LEADER_EMAIL,
+    DEFAULT_LEADER_PASSWORD,
+    DEFAULT_AUTHORITY_NAME,
+    DEFAULT_AUTHORITY_EMAIL,
+    DEFAULT_AUTHORITY_PASSWORD,
+)
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -32,11 +40,18 @@ def _ensure_complaint_workflow_columns():
     # Lightweight migration for existing SQLite DBs before workflow fields.
     required_columns = {
         "citizen_user_id": "INTEGER",
+        "citizen_language": "VARCHAR",
+        "image_path": "VARCHAR",
+        "audio_path": "VARCHAR",
         "assigned_authority": "VARCHAR",
         "authority_email": "VARCHAR",
         "leader_note": "TEXT",
         "authority_response": "TEXT",
         "citizen_update": "TEXT",
+        "before_meta": "TEXT",
+        "after_meta": "TEXT",
+        "verification_score": "FLOAT",
+        "verification_confidence": "FLOAT",
     }
 
     with engine.connect() as conn:
@@ -77,8 +92,36 @@ def _seed_default_leader():
         db.close()
 
 
+def _seed_default_authority():
+    from models.user import User
+    from routers.auth import hash_password
+
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.email == DEFAULT_AUTHORITY_EMAIL).first()
+        if existing:
+            if existing.role != "authority":
+                existing.role = "authority"
+                db.commit()
+            return
+
+        authority = User(
+            name=DEFAULT_AUTHORITY_NAME,
+            email=DEFAULT_AUTHORITY_EMAIL,
+            phone=None,
+            role="authority",
+            hashed_password=hash_password(DEFAULT_AUTHORITY_PASSWORD),
+        )
+        db.add(authority)
+        db.commit()
+        print(f"[Auth] Default authority ready: {DEFAULT_AUTHORITY_EMAIL}")
+    finally:
+        db.close()
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _ensure_user_role_column()
     _ensure_complaint_workflow_columns()
     _seed_default_leader()
+    _seed_default_authority()

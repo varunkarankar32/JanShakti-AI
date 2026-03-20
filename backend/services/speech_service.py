@@ -4,9 +4,17 @@ Supports Indian languages: Hindi, Bhojpuri, Tamil, Telugu, Marathi, Bengali, etc
 """
 
 import os
+import io
+import wave
 import tempfile
 from typing import Dict
 from config import WHISPER_MODEL
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
 
 # Try to load whisper
 try:
@@ -84,6 +92,8 @@ class SpeechService:
         """Run Whisper transcription."""
         tmp_path = None
         try:
+            ext = (ext or "wav").lower().strip(".")
+
             # Write to temp file
             with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
                 tmp.write(audio_bytes)
@@ -91,36 +101,88 @@ class SpeechService:
 
             result = self.model.transcribe(tmp_path, task="transcribe", fp16=False)
 
-            # Detect language
-            detected_lang = result.get("language", "en")
-            lang_name = SUPPORTED_LANGUAGES.get(detected_lang, detected_lang)
-
-            segments = result.get("segments", [])
-            duration = segments[-1]["end"] if segments else 0.0
-            avg_confidence = (
-                sum(s.get("avg_logprob", -0.5) for s in segments) / len(segments)
-                if segments else -1.0
-            )
-            # Convert log prob to approximate confidence
-            confidence = max(0.0, min(1.0, 1.0 + avg_confidence))
-
-            return {
-                "text": result["text"].strip(),
-                "language": lang_name,
-                "duration": round(duration, 1),
-                "confidence": round(confidence, 3),
-            }
-
         except Exception as e:
-            print(f"[Speech] Transcription error: {e}")
-            if ALLOW_SIMULATED_TRANSCRIPTION:
-                return self._simulated_transcribe()
-            return self._empty_transcription(
-                "Unable to decode/transcribe audio. Ensure ffmpeg is installed and audio format is supported."
-            )
+            print(f"[Speech] File transcription error: {e}")
+
+            # Whisper depends on ffmpeg for file decoding. For wav uploads,
+            # attempt direct PCM decoding to keep transcription available.
+            result = self._transcribe_wav_bytes(audio_bytes, ext)
+            if result is None:
+                if ALLOW_SIMULATED_TRANSCRIPTION:
+                    return self._simulated_transcribe()
+                return self._empty_transcription(
+                    "Unable to decode/transcribe audio. Ensure ffmpeg is installed and audio format is supported."
+                )
+
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+
+        return self._format_result(result)
+
+    def _format_result(self, result: Dict) -> Dict:
+        text = (result.get("text") or "").strip()
+
+        if not text:
+            return self._empty_transcription("No speech detected in uploaded audio.")
+
+        # Detect language
+        detected_lang = result.get("language", "en")
+        lang_name = SUPPORTED_LANGUAGES.get(detected_lang, detected_lang)
+
+        segments = result.get("segments", [])
+        duration = segments[-1]["end"] if segments else 0.0
+        avg_confidence = (
+            sum(s.get("avg_logprob", -0.5) for s in segments) / len(segments)
+            if segments else -1.0
+        )
+        # Convert log prob to approximate confidence
+        confidence = max(0.0, min(1.0, 1.0 + avg_confidence))
+
+        return {
+            "text": text,
+            "language": lang_name,
+            "duration": round(duration, 1),
+            "confidence": round(confidence, 3),
+        }
+
+    def _transcribe_wav_bytes(self, audio_bytes: bytes, ext: str):
+        if ext != "wav" or not NUMPY_AVAILABLE:
+            return None
+
+        try:
+            with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
+                channels = wav_file.getnchannels()
+                sample_width = wav_file.getsampwidth()
+                frame_rate = wav_file.getframerate()
+                frame_count = wav_file.getnframes()
+                frames = wav_file.readframes(frame_count)
+
+            if sample_width == 2:
+                pcm = np.frombuffer(frames, dtype=np.int16).astype(np.float32)
+                pcm = pcm / 32768.0
+            elif sample_width == 1:
+                pcm = np.frombuffer(frames, dtype=np.uint8).astype(np.float32)
+                pcm = (pcm - 128.0) / 128.0
+            else:
+                return None
+
+            if channels > 1:
+                pcm = pcm.reshape(-1, channels).mean(axis=1)
+
+            if frame_rate != 16000:
+                duration = len(pcm) / float(frame_rate)
+                if duration <= 0:
+                    return None
+                target_length = max(1, int(duration * 16000))
+                x_old = np.linspace(0.0, duration, num=len(pcm), endpoint=False)
+                x_new = np.linspace(0.0, duration, num=target_length, endpoint=False)
+                pcm = np.interp(x_new, x_old, pcm).astype(np.float32)
+
+            return self.model.transcribe(pcm, task="transcribe", fp16=False)
+        except Exception as e:
+            print(f"[Speech] WAV fallback transcription error: {e}")
+            return None
 
     def _simulated_transcribe(self) -> Dict:
         """Simulated transcription for demo."""

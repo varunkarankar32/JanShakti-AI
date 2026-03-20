@@ -1,5 +1,5 @@
 """
-Auth Router — Signup, Login, leader login, and current user endpoints.
+Auth Router — Signup, Login, role-specific logins, and current user endpoints.
 Uses JWT tokens and PBKDF2-SHA256 hashing.
 """
 
@@ -36,6 +36,13 @@ class SignupRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     email: str
+    password: str
+
+
+class AuthorityCreateRequest(BaseModel):
+    name: str
+    email: str
+    phone: Optional[str] = None
     password: str
 
 
@@ -113,6 +120,19 @@ def get_current_leader(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+def get_current_authority(current_user: User = Depends(get_current_user)) -> User:
+    if (current_user.role or "citizen") != "authority":
+        raise HTTPException(status_code=403, detail="Authority access required")
+    return current_user
+
+
+def get_current_leader_or_authority(current_user: User = Depends(get_current_user)) -> User:
+    role = current_user.role or "citizen"
+    if role not in {"leader", "authority"}:
+        raise HTTPException(status_code=403, detail="Leader or authority access required")
+    return current_user
+
+
 def _auth_payload(user: User) -> dict:
     return {
         "token": create_token(user.id, user.email, user.role or "citizen"),
@@ -167,6 +187,75 @@ def leader_login(req: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid leader credentials")
 
     return _auth_payload(user)
+
+
+@router.post("/authority/login", response_model=AuthResponse)
+def authority_login(req: LoginRequest, db: Session = Depends(get_db)):
+    """Login endpoint that only allows authority accounts."""
+    user = db.query(User).filter(User.email == req.email).first()
+    if not user or (user.role or "citizen") != "authority" or not verify_password(req.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid authority credentials")
+
+    return _auth_payload(user)
+
+
+@router.post("/authority/create")
+def create_authority_user(
+    req: AuthorityCreateRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_leader),
+):
+    """Leader-only endpoint to create authority users."""
+    existing = db.query(User).filter(User.email == req.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user = User(
+        name=req.name,
+        email=req.email,
+        phone=req.phone,
+        role="authority",
+        hashed_password=hash_password(req.password),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "phone": user.phone,
+        "role": user.role,
+    }
+
+
+@router.get("/authority/list")
+def list_authority_users(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_leader),
+):
+    """Leader-only endpoint to list all authority accounts."""
+    rows = (
+        db.query(User)
+        .filter(User.role == "authority")
+        .order_by(User.name.asc())
+        .all()
+    )
+
+    return {
+        "count": len(rows),
+        "authorities": [
+            {
+                "id": row.id,
+                "name": row.name,
+                "email": row.email,
+                "phone": row.phone,
+                "role": row.role,
+            }
+            for row in rows
+        ],
+    }
 
 
 @router.get("/me", response_model=UserResponse)

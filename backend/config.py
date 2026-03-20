@@ -24,6 +24,11 @@ DEFAULT_LEADER_NAME = os.getenv("DEFAULT_LEADER_NAME", "District Leader")
 DEFAULT_LEADER_EMAIL = os.getenv("DEFAULT_LEADER_EMAIL", "leader@janshakti.ai")
 DEFAULT_LEADER_PASSWORD = os.getenv("DEFAULT_LEADER_PASSWORD", "Leader@123")
 
+# Bootstrap authority account (for local setup)
+DEFAULT_AUTHORITY_NAME = os.getenv("DEFAULT_AUTHORITY_NAME", "Ward Authority")
+DEFAULT_AUTHORITY_EMAIL = os.getenv("DEFAULT_AUTHORITY_EMAIL", "authority@janshakti.ai")
+DEFAULT_AUTHORITY_PASSWORD = os.getenv("DEFAULT_AUTHORITY_PASSWORD", "Authority@123")
+
 # Optional SMTP config for leader -> authority email dispatch
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))

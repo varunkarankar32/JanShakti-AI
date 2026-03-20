@@ -3,10 +3,16 @@ NLP Router — Text classification and entity extraction endpoints.
 """
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 from models.schemas import NLPClassifyRequest, NLPClassifyResponse
 from services.nlp_service import nlp_service
+from services.civic_intelligence_service import civic_intelligence_service
 
 router = APIRouter(prefix="/nlp", tags=["NLP"])
+
+
+class FactCheckRequest(BaseModel):
+    text: str
 
 
 @router.post("/classify", response_model=NLPClassifyResponse)
@@ -37,4 +43,14 @@ def extract_entities(request: NLPClassifyRequest):
         "entities": entities,
         "urgency_level": urgency_level,
         "urgency_score": urgency_score,
+    }
+
+
+@router.post("/fact-check")
+def fact_check_claim(request: FactCheckRequest):
+    """Verify rumor-like claims against known misinformation patterns."""
+    result = civic_intelligence_service.fact_check_text(request.text)
+    return {
+        "input": request.text,
+        **result,
     }

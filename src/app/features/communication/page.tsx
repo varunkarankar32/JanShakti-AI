@@ -2,39 +2,105 @@
 
 import { useState } from 'react';
 
-const sampleReport = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-WEEKLY WARD REPORT — Ward 12
-Date: Mar 7-13, 2026
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Resolved This Week:       23 issues
-In Progress:                    8 issues
-New Complaints:            15 issues
-Citizen Satisfaction:      4.2 / 5.0
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
 
-TOP WIN:
-Main road pothole repaired in 2 days
-(vs 18 day avg). GPS-verified.
-Sunita's water complaint resolved
-in 36 hours — rated 5/5.
+type Activity = {
+  actor_role: string;
+  action: string;
+  note?: string;
+  created_at?: string;
+};
 
-NEXT WEEK PRIORITY:
-Water pipeline upgrade — Mon Mar 16
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+type TicketData = {
+  ticket_id: string;
+  status: string;
+  citizen_update?: string;
+  authority_response?: string;
+  activity?: Activity[];
+};
 
-const smsUpdates = [
-  { time: '6:05 AM', msg: 'Your complaint about water pipe (Ticket #4521) has been received and assigned to our team.', status: 'assigned' },
-  { time: '10:15 AM', msg: 'Your water pipe repair work has started. Plumbing team is on-site at Ward 7.', status: 'in_progress' },
-  { time: '4:30 PM', msg: 'Your water pipe complaint (Ticket #4521) has been resolved. Please rate our service!', status: 'resolved' },
-];
+type ReportStats = {
+  issues_raised?: number;
+  issues_solved?: number;
+  resolution_rate?: number;
+  citizen_satisfaction?: number;
+  open?: number;
+  in_progress?: number;
+  p0_raised?: number;
+  p1_raised?: number;
+  avg_resolution_hours?: number;
+  stale_over_72h?: number;
+};
+
+const formatDate = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function CommunicationPage() {
-  const [generating, setGenerating] = useState(false);
-  const [showReport, setShowReport] = useState(false);
+  const [ward, setWard] = useState('Ward 1');
+  const [dateFrom, setDateFrom] = useState(formatDate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)));
+  const [dateTo, setDateTo] = useState(formatDate(new Date()));
+  const [report, setReport] = useState('');
+  const [reportStats, setReportStats] = useState<ReportStats | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState('');
 
-  const generateReport = () => {
-    setShowReport(false);
-    setGenerating(true);
-    setTimeout(() => { setGenerating(false); setShowReport(true); }, 3000);
+  const [ticketId, setTicketId] = useState('');
+  const [ticket, setTicket] = useState<TicketData | null>(null);
+  const [ticketLoading, setTicketLoading] = useState(false);
+  const [ticketError, setTicketError] = useState('');
+
+  const generateReport = async () => {
+    setReportLoading(true);
+    setReportError('');
+    setReport('');
+    setReportStats(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/reports/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ward,
+          date_from: dateFrom,
+          date_to: dateTo,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setReportError(data?.detail || 'Failed to generate report');
+        return;
+      }
+
+      const data = await res.json();
+      setReport(data.report_text || 'No report text returned');
+      setReportStats((data.stats || null) as ReportStats | null);
+    } catch {
+      setReportError('Unable to connect to report service');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const fetchTicketTimeline = async () => {
+    if (!ticketId.trim()) return;
+    setTicketLoading(true);
+    setTicketError('');
+    setTicket(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/complaints/${ticketId.trim()}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setTicketError(data?.detail || 'Ticket not found');
+        return;
+      }
+      const data = await res.json();
+      setTicket(data);
+    } catch {
+      setTicketError('Unable to load ticket timeline');
+    } finally {
+      setTicketLoading(false);
+    }
   };
 
   return (
@@ -43,95 +109,117 @@ export default function CommunicationPage() {
         <div className="container">
           <div className="section-label">CHAPTER 08</div>
           <h1 className="section-title">AI Communication Engine</h1>
-          <p className="section-subtitle" style={{ marginBottom: 48 }}>
-            Leaders shouldn&apos;t spend hours drafting updates — AI generates them from real data
+          <p className="section-subtitle" style={{ marginBottom: 40 }}>
+            Auto-generated ward reports and transparent citizen communication from live complaint data
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 32 }}>
-            {/* Left: Features */}
-            <div>
-              {[
-                { icon: '📋', title: 'Weekly Progress Reports', desc: 'AI compiles all issue data, resolution rates, pending items into a professional report — auto-translated to local language. Leader reviews and publishes with one tap.' },
-                { icon: '📱', title: 'Real-Time Citizen Updates', desc: 'Citizens get SMS updates when complaint is assigned, work begins, and verified complete. Full transparency from filing to resolution.' },
-                { icon: '🛡️', title: 'Misinformation Rapid Response', desc: 'Rumour detected → AI generates fact-checked response with data + official links in 5 minutes. Leader reviews and broadcasts.' },
-                { icon: '📢', title: 'Proactive Announcements', desc: 'Monsoon prep, vaccination drives, new scheme launches — AI drafts targeted broadcasts by ward, demography, and past interaction history.' },
-              ].map(feat => (
-                <div key={feat.title} className="glass-card" style={{ marginBottom: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-                    <div style={{ fontSize: '1.5rem', marginTop: 2 }}>{feat.icon}</div>
-                    <div>
-                      <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 6 }}>{feat.title}</h3>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>{feat.desc}</p>
-                    </div>
-                  </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24 }}>
+            <div className="glass-card" style={{ padding: 24 }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 14 }}>Ward Report Generator</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="form-group">
+                  <label className="form-label">Ward</label>
+                  <input className="form-input" value={ward} onChange={(e) => setWard(e.target.value)} placeholder="Ward 1" />
                 </div>
-              ))}
-            </div>
-
-            {/* Right: AI Report Demo */}
-            <div>
-              <div className="glass-card" style={{ padding: 28 }}>
-                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>📝 AI Report Generator</h3>
-                <button onClick={generateReport} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }}>
-                  {generating ? '⚡ AI Generating Report...' : '▶ Generate Weekly Report'}
-                </button>
-
-                {generating && (
-                  <div style={{ textAlign: 'center', padding: 20 }}>
-                    <div style={{ fontSize: '2rem', animation: 'rotate 2s linear infinite' }}>⚙️</div>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: 8 }}>
-                      Analyzing 46 complaints, resolution data, citizen feedback...
-                    </p>
-                  </div>
-                )}
-
-                {showReport && (
-                  <div style={{ animation: 'fadeInUp 0.5s ease' }}>
-                    <div style={{ fontSize: '0.75rem', color: '#22c55e', fontWeight: 700, marginBottom: 8 }}>✅ REPORT GENERATED</div>
-                    <pre style={{
-                      background: 'var(--bg-primary)', borderRadius: 8, padding: 16,
-                      fontSize: '0.75rem', color: 'var(--accent-cyan)', lineHeight: 1.6,
-                      fontFamily: 'monospace', whiteSpace: 'pre-wrap', overflowX: 'auto',
-                      border: '1px solid var(--border-subtle)',
-                    }}>
-                      {sampleReport}
-                    </pre>
-                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                      <button className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '0.8rem' }}>📤 Publish</button>
-                      <button className="btn btn-secondary" style={{ padding: '8px 16px', fontSize: '0.8rem' }}>🌐 Translate</button>
-                      <button className="btn btn-secondary" style={{ padding: '8px 16px', fontSize: '0.8rem' }}>✏️ Edit</button>
-                    </div>
-                  </div>
-                )}
+                <div />
+                <div className="form-group">
+                  <label className="form-label">From Date</label>
+                  <input type="date" className="form-input" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">To Date</label>
+                  <input type="date" className="form-input" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+                </div>
               </div>
 
-              {/* Citizen SMS Flow */}
-              <div className="glass-card" style={{ padding: 28, marginTop: 16 }}>
-                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>📱 Citizen SMS Updates for Ticket #4521</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {smsUpdates.map((sms, i) => (
-                    <div key={i} style={{
-                      display: 'flex', gap: 12, alignItems: 'flex-start',
-                      animation: `fadeInUp 0.3s ease ${i * 0.15}s both`,
-                    }}>
-                      <div style={{
-                        width: 8, height: 8, borderRadius: '50%', marginTop: 8,
-                        background: sms.status === 'resolved' ? '#22c55e' : sms.status === 'in_progress' ? '#3b82f6' : '#f59e0b',
-                      }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginBottom: 4 }}>{sms.time}</div>
-                        <div style={{
-                          background: 'rgba(37,211,102,0.08)', border: '1px solid rgba(37,211,102,0.2)',
-                          borderRadius: '12px 12px 12px 4px', padding: '10px 14px',
-                          fontSize: '0.85rem', color: 'var(--text-primary)', lineHeight: 1.5,
-                        }}>
-                          {sms.msg}
-                        </div>
-                      </div>
+              <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={generateReport}>
+                {reportLoading ? 'Generating...' : 'Generate Live Report'}
+              </button>
+
+              {reportError && <div style={{ color: '#dc2626', marginTop: 10, fontSize: '0.82rem' }}>{reportError}</div>}
+
+              {reportStats && (
+                <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+                  {[
+                    { label: 'Raised', value: reportStats.issues_raised ?? 0 },
+                    { label: 'Solved', value: reportStats.issues_solved ?? 0 },
+                    { label: 'Resolution', value: `${reportStats.resolution_rate ?? 0}%` },
+                    { label: 'Satisfaction', value: `${reportStats.citizen_satisfaction ?? 0}/5` },
+                    { label: 'Open', value: reportStats.open ?? 0 },
+                    { label: 'In Progress', value: reportStats.in_progress ?? 0 },
+                    { label: 'P0', value: reportStats.p0_raised ?? 0 },
+                    { label: 'Stale >72h', value: reportStats.stale_over_72h ?? 0 },
+                  ].map((item) => (
+                    <div key={item.label} style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 8 }}>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>{item.label}</div>
+                      <div style={{ fontSize: '0.95rem', fontWeight: 700 }}>{item.value}</div>
                     </div>
                   ))}
                 </div>
+              )}
+
+              {report && (
+                <pre style={{
+                  marginTop: 12,
+                  background: 'var(--bg-primary)',
+                  borderRadius: 8,
+                  padding: 14,
+                  border: '1px solid var(--border-subtle)',
+                  fontSize: '0.75rem',
+                  lineHeight: 1.55,
+                  whiteSpace: 'pre-wrap',
+                }}>
+                  {report}
+                </pre>
+              )}
+            </div>
+
+            <div className="glass-card" style={{ padding: 24 }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 14 }}>Citizen Update Timeline</h3>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <input className="form-input" value={ticketId} onChange={(e) => setTicketId(e.target.value)} placeholder="TKT-XXXXXX" />
+                <button className="btn btn-secondary" onClick={fetchTicketTimeline}>{ticketLoading ? 'Loading...' : 'Load'}</button>
               </div>
+
+              {ticketError && <div style={{ color: '#dc2626', marginBottom: 10, fontSize: '0.82rem' }}>{ticketError}</div>}
+
+              {ticket && (
+                <div>
+                  <div style={{ marginBottom: 10, fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
+                    <strong>{ticket.ticket_id}</strong> | Status: <strong>{ticket.status}</strong>
+                  </div>
+
+                  {ticket.citizen_update && (
+                    <div style={{
+                      background: 'rgba(59,130,246,0.08)',
+                      border: '1px solid rgba(59,130,246,0.2)',
+                      borderRadius: 8,
+                      padding: 10,
+                      marginBottom: 10,
+                      fontSize: '0.82rem',
+                    }}>
+                      {ticket.citizen_update}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {(ticket.activity || []).slice(-8).reverse().map((a, idx) => (
+                      <div key={`${a.action}-${idx}`} style={{
+                        borderRadius: 8,
+                        border: '1px solid var(--border-subtle)',
+                        padding: 10,
+                        background: 'var(--bg-tertiary)',
+                      }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.82rem' }}>{a.action.replaceAll('_', ' ')}</div>
+                        {a.note && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>{a.note}</div>}
+                        <div style={{ marginTop: 4, fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>
+                          {a.actor_role} {a.created_at ? `| ${new Date(a.created_at).toLocaleString('en-IN')}` : ''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

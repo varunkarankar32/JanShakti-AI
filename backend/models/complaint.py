@@ -42,6 +42,7 @@ class Complaint(Base):
     citizen_user_id = Column(Integer, nullable=True, index=True)
     citizen_name = Column(String, nullable=True)
     citizen_phone = Column(String, nullable=True)
+    citizen_language = Column(String, nullable=True, default="en")
 
     # AI Fields
     priority = Column(SqlEnum(PriorityLevel), default=PriorityLevel.P3)
@@ -72,6 +73,10 @@ class Complaint(Base):
     before_photo = Column(String, nullable=True)
     after_photo = Column(String, nullable=True)
     verification_status = Column(String, nullable=True)
+    before_meta = Column(Text, nullable=True)
+    after_meta = Column(Text, nullable=True)
+    verification_score = Column(Float, nullable=True)
+    verification_confidence = Column(Float, nullable=True)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())

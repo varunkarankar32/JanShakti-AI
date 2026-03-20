@@ -15,6 +15,9 @@ class ComplaintCreate(BaseModel):
     longitude: Optional[float] = None
     citizen_name: Optional[str] = None
     citizen_phone: Optional[str] = None
+    citizen_language: Optional[str] = "en"
+    image_path: Optional[str] = None
+    audio_path: Optional[str] = None
     input_mode: str = "text"
 
 

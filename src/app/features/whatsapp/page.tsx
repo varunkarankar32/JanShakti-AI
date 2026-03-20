@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
+
 const FLOW_STEPS = [
   {
     user: 'hi',
@@ -36,10 +38,28 @@ const FLOW_STEPS = [
 export default function WhatsAppPage() {
   const [visibleSteps, setVisibleSteps] = useState(1);
   const [simulatedInput, setSimulatedInput] = useState('');
+  const [botReply, setBotReply] = useState('');
+  const [botLoading, setBotLoading] = useState(false);
 
   const handleNext = () => {
     if (visibleSteps < FLOW_STEPS.length) {
       setVisibleSteps(visibleSteps + 1);
+    }
+  };
+
+  const testBotLive = async () => {
+    if (!simulatedInput.trim()) return;
+    setBotLoading(true);
+    setBotReply('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/whatsapp/test?message=${encodeURIComponent(simulatedInput.trim())}`);
+      const data = await res.json().catch(() => ({}));
+      setBotReply(data?.response || 'No response received');
+    } catch {
+      setBotReply('Unable to connect to WhatsApp test endpoint.');
+    } finally {
+      setBotLoading(false);
     }
   };
 
@@ -177,6 +197,26 @@ export default function WhatsAppPage() {
               🔄 Restart Demo
             </button>
           )}
+
+          <div style={{ marginTop: 16, background: '#F8FAFC', borderRadius: 10, border: '1px solid #E2E8F0', padding: 12 }}>
+            <div style={{ fontWeight: 600, marginBottom: 8, color: '#0F172A' }}>Try Live Bot Logic</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={simulatedInput}
+                onChange={(e) => setSimulatedInput(e.target.value)}
+                placeholder="Type message (hi, complaint, status...)"
+                style={{ flex: 1, padding: '10px 12px', border: '1px solid #CBD5E1', borderRadius: 8 }}
+              />
+              <button onClick={testBotLive} style={{ padding: '10px 14px', borderRadius: 8, border: 'none', background: '#2563EB', color: 'white', fontWeight: 600 }}>
+                {botLoading ? '...' : 'Send'}
+              </button>
+            </div>
+            {botReply && (
+              <div style={{ marginTop: 8, fontSize: 13, color: '#334155', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                {botReply}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Features List */}
