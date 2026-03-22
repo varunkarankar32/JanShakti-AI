@@ -43,6 +43,10 @@ class ComplaintResponse(BaseModel):
     recurrence_score: float
     sentiment_score: float
     ai_category: Optional[str]
+    ai_breakdown: Optional[dict] = None
+    ai_explanation: Optional[str] = None
+    ai_model_version: Optional[str] = None
+    score_source: Optional[str] = None
     status: str
     input_mode: str
     assigned_to: Optional[str]
@@ -84,7 +88,14 @@ class PriorityScoreResponse(BaseModel):
     impact: float
     recurrence: float
     sentiment: float
+    score_source: Optional[str] = None
+    sentiment_label: Optional[str] = None
+    sentiment_confidence: Optional[float] = None
+    starvation_bonus: Optional[float] = None
     response_time: str
+    model_version: Optional[str] = None
+    weights: Optional[dict] = None
+    breakdown: Optional[dict] = None
     explanation: str
 
 

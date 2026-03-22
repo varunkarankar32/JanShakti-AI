@@ -53,6 +53,9 @@ class Complaint(Base):
     sentiment_score = Column(Float, default=0.0)
     ai_category = Column(String, nullable=True)  # AI-classified category
     ai_entities = Column(Text, nullable=True)     # JSON of extracted entities
+    ai_breakdown = Column(Text, nullable=True)    # JSON of AI scoring components/weights
+    ai_explanation = Column(Text, nullable=True)  # Human-readable AI scoring rationale
+    ai_model_version = Column(String, nullable=True)
 
     # Status
     status = Column(SqlEnum(ComplaintStatus), default=ComplaintStatus.OPEN)

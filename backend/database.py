@@ -10,7 +10,13 @@ from config import (
     DEFAULT_AUTHORITY_PASSWORD,
 )
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
+engine_kwargs = {"pool_pre_ping": True}
+if IS_SQLITE:
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -28,6 +34,9 @@ def get_db():
 
 def _ensure_user_role_column():
     # Lightweight migration for existing SQLite DBs created before role support.
+    if not IS_SQLITE:
+        return
+
     with engine.connect() as conn:
         result = conn.execute(text("PRAGMA table_info(users)"))
         columns = [row[1] for row in result.fetchall()]
@@ -38,6 +47,9 @@ def _ensure_user_role_column():
 
 def _ensure_complaint_workflow_columns():
     # Lightweight migration for existing SQLite DBs before workflow fields.
+    if not IS_SQLITE:
+        return
+
     required_columns = {
         "citizen_user_id": "INTEGER",
         "citizen_language": "VARCHAR",
@@ -48,6 +60,9 @@ def _ensure_complaint_workflow_columns():
         "leader_note": "TEXT",
         "authority_response": "TEXT",
         "citizen_update": "TEXT",
+        "ai_breakdown": "TEXT",
+        "ai_explanation": "TEXT",
+        "ai_model_version": "VARCHAR",
         "before_meta": "TEXT",
         "after_meta": "TEXT",
         "verification_score": "FLOAT",

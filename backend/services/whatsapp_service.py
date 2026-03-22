@@ -459,16 +459,38 @@ class WhatsAppBotService:
                 category = data.get("category", "Others")
                 ai_payload = data.get("ai") or {}
 
+                media_notes = []
+                transcript = str(data.get("transcript") or "").strip()
+                if transcript:
+                    media_notes.append(f"Audio transcript: {transcript[:260]}")
+
+                image_desc = str(data.get("image_problem_description") or "").strip()
+                if image_desc:
+                    media_notes.append(f"Image analysis: {image_desc[:260]}")
+
+                ai_detection = data.get("ai_detection_result")
+                if isinstance(ai_detection, dict):
+                    det_category = str(ai_detection.get("category", "Unknown"))
+                    det_severity = str(ai_detection.get("severity", "unknown"))
+                    media_notes.append(f"Image detected {det_category} with {det_severity} severity.")
+
+                scoring_text = description
+                if media_notes:
+                    scoring_text = f"{description}\n\nAI Media Context:\n" + "\n".join(
+                        f"- {note}" for note in media_notes
+                    )
+
                 # AI processing
                 ai_category = ai_payload.get("category")
                 if not ai_category:
                     ai_category, _ = nlp_service.classify(description)
 
                 priority_result = priority_engine.calculate_score(
-                    text=description,
+                    text=scoring_text,
                     category=category,
                     ward=data.get("ward", "Ward 1"),
                     recurrence_count=0,
+                    local_cluster_count=0,
                     social_mentions=0,
                 )
 
@@ -502,6 +524,9 @@ class WhatsAppBotService:
                     sentiment_score=priority_result["sentiment"],
                     ai_category=ai_category,
                     ai_entities=json.dumps(ai_payload),
+                    ai_breakdown=json.dumps(priority_result.get("breakdown", {})),
+                    ai_explanation=priority_result.get("explanation"),
+                    ai_model_version=priority_result.get("model_version"),
                     ai_detection_result=detection_json,
                     status=ComplaintStatus.OPEN,
                     input_mode=input_mode,

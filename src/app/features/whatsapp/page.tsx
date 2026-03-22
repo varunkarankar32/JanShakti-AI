@@ -41,6 +41,18 @@ export default function WhatsAppPage() {
   const [botReply, setBotReply] = useState('');
   const [botLoading, setBotLoading] = useState(false);
 
+  const getSimulatedPhone = () => {
+    if (typeof window === 'undefined') return 'whatsapp:+919999999999';
+    const key = 'whatsapp_test_phone';
+    const existing = window.localStorage.getItem(key);
+    if (existing) return existing;
+
+    const suffix = Math.floor(100000000 + Math.random() * 900000000).toString();
+    const generated = `whatsapp:+91${suffix}`;
+    window.localStorage.setItem(key, generated);
+    return generated;
+  };
+
   const handleNext = () => {
     if (visibleSteps < FLOW_STEPS.length) {
       setVisibleSteps(visibleSteps + 1);
@@ -53,7 +65,10 @@ export default function WhatsAppPage() {
     setBotReply('');
 
     try {
-      const res = await fetch(`${API_BASE}/api/whatsapp/test?message=${encodeURIComponent(simulatedInput.trim())}`);
+      const phone = getSimulatedPhone();
+      const res = await fetch(
+        `${API_BASE}/api/whatsapp/test?message=${encodeURIComponent(simulatedInput.trim())}&phone=${encodeURIComponent(phone)}`,
+      );
       const data = await res.json().catch(() => ({}));
       setBotReply(data?.response || 'No response received');
     } catch {

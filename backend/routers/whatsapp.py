@@ -171,10 +171,19 @@ async def send_whatsapp_message(
 
 
 @router.get("/test")
-def test_bot(message: str = "hello"):
-    """Test the bot logic without actual WhatsApp connection."""
+def test_bot(
+    message: str = "hello",
+    phone: str = "whatsapp:+919999999999",
+    db: Session = Depends(get_db),
+):
+    """Test bot logic with real DB persistence for complaint flow."""
+    normalized_phone = phone.strip() if phone else "whatsapp:+919999999999"
+    if not normalized_phone.startswith("whatsapp:"):
+        normalized_phone = f"whatsapp:{normalized_phone}"
+
     response = whatsapp_bot.handle_message(
-        phone="whatsapp:+919999999999",
+        phone=normalized_phone,
         message=message,
+        db=db,
     )
-    return {"input": message, "response": response}
+    return {"input": message, "phone": normalized_phone, "response": response}

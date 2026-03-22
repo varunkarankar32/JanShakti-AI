@@ -20,7 +20,7 @@
 
 * **🎙️ Multi-Modal Input:** File complaints using Voice, Text, or Photo uploads.
 * **🧠 AI Priority Engine:** Automatically calculates complaint urgency using a custom (Urgency × Impact × Recurrence × Sentiment) scoring matrix.
-* **📊 NLP Classification:** Auto-categorizes incoming complaints into 7 distinct municipal categories.
+* ** NLP Classification:** Auto-categorizes incoming complaints into 7 distinct municipal categories.
 * **🎭 Sentiment Analysis:** Employs BERT-based models to track and analyze citizen sentiment over time.
 * **👁️ YOLOv8 Vision:** Automated pothole and infrastructure damage detection directly from user-uploaded photos.
 * **🗣️ Whisper STT:** Seamless Speech-to-Text conversion supporting 12+ regional Indian languages.
@@ -77,8 +77,19 @@ On the first backend run, services automatically download/load pretrained models
 - NLP Classification: Hugging Face zero-shot model (`typeform/distilbert-base-uncased-mnli`) if local `classifier.pkl` is missing
 - Speech-to-Text: OpenAI Whisper (`base` by default, falls back to `tiny`)
 - Vision: Custom YOLO weights if present, otherwise pretrained `yolov8n.pt`
+- Priority Scoring LLM: Qwen instruct model for complaint triage (`Qwen/Qwen2.5-0.5B-Instruct` by default)
 
 No manual training is required for inference.
+
+Qwen priority scoring config (optional) in [backend/.env](backend/.env):
+
+```env
+QWEN_PRIORITY_ENABLED=true
+QWEN_PRIORITY_MODEL=Qwen/Qwen2.5-0.5B-Instruct
+QWEN_PRIORITY_MAX_NEW_TOKENS=220
+```
+
+If Qwen is unavailable on the machine, backend automatically falls back to deterministic heuristic scoring.
 
 If speech transcription fails (missing ffmpeg or unsupported audio), API now returns an explicit error instead of demo/hardcoded text.
 For demo-only behavior, set `ALLOW_SIMULATED_TRANSCRIPTION=true` in [backend/.env](backend/.env).
@@ -133,6 +144,60 @@ JanShakti-AI/
 │   └── ml/               # Model training and evaluation scripts
 └── README.md
 ```
+
+## 🌍 Free Deployment (Render + Vercel)
+
+This repo is now configured for a free-tier deployment setup:
+
+- Backend: Render Web Service (Free)
+- Frontend: Vercel (Hobby)
+
+### 1. Deploy Backend on Render
+
+1. Push this repo to GitHub.
+2. In Render, choose **New +** → **Blueprint**.
+3. Select this repository.
+4. Render reads `render.yaml` and creates the backend service.
+5. Set environment variables in Render service settings:
+	- `DATABASE_URL=<free-postgres-connection-string>`
+	- `CORS_ORIGINS=https://<your-vercel-domain>`
+	- Optional: `DEFAULT_LEADER_EMAIL`, `DEFAULT_LEADER_PASSWORD`, `DEFAULT_AUTHORITY_EMAIL`, `DEFAULT_AUTHORITY_PASSWORD`
+6. Deploy and copy backend URL, for example:
+	- `https://janshakti-backend.onrender.com`
+
+Free DB options (choose one):
+
+- Neon (recommended): create free Postgres project, copy pooled connection string into `DATABASE_URL`
+- Supabase: create free Postgres project, use transaction pooler URL in `DATABASE_URL`
+- Render Postgres free trial: if available in your region/account, attach internal/external URL as `DATABASE_URL`
+
+Health check endpoint:
+
+- `https://<your-render-domain>/health`
+
+### 2. Deploy Frontend on Vercel
+
+1. Import this same repository into Vercel.
+2. Framework: Next.js (auto-detected).
+3. Set environment variable:
+	- `NEXT_PUBLIC_API_BASE_URL=https://<your-render-domain>`
+	- Optional: `BACKEND_API_URL=https://<your-render-domain>`
+4. Deploy.
+
+### 3. Verify End-to-End
+
+1. Open frontend deployment URL.
+2. Open communication page and generate a report.
+3. Confirm browser network calls hit `https://<your-render-domain>/api/...`
+4. Confirm backend API docs open at:
+	- `https://<your-render-domain>/docs`
+
+### Notes on Free Tiers
+
+- Render free services may sleep when idle (cold starts).
+- SQLite data is stored in container filesystem and may reset on rebuild/restart.
+- For persistent production data, use a managed DB (Postgres/Neon/Supabase) and set `DATABASE_URL`.
+- `DATABASE_URL` is now explicitly expected in `render.yaml` for production deployments.
 
 ## 👨‍💻 The Team
 

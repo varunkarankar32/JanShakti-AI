@@ -85,6 +85,8 @@ class SpeechService:
             "language": "unknown",
             "duration": 0.0,
             "confidence": 0.0,
+            "transcription_source": "unavailable",
+            "transcription_model": "none",
             "error": error_message,
         }
 
@@ -144,6 +146,8 @@ class SpeechService:
             "language": lang_name,
             "duration": round(duration, 1),
             "confidence": round(confidence, 3),
+            "transcription_source": "whisper",
+            "transcription_model": self.model_name,
         }
 
     def _transcribe_wav_bytes(self, audio_bytes: bytes, ext: str):
@@ -191,6 +195,8 @@ class SpeechService:
             "language": "Hindi/Bhojpuri",
             "duration": 28.5,
             "confidence": 0.87,
+            "transcription_source": "simulated_fallback",
+            "transcription_model": "simulated",
         }
 
 

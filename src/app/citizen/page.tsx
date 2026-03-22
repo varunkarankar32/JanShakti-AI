@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { CATEGORIES, WARDS, STATUS_CONFIG } from '@/lib/mockData';
+import { getBackendBaseUrl } from '@/lib/apiBase';
 
 interface SubmittedComplaint {
   id: string;
@@ -10,8 +11,24 @@ interface SubmittedComplaint {
   category: string;
   ward: string;
   priority: string;
+  effective_priority?: string;
   status: string;
   ai_score: number;
+  effective_ai_score?: number;
+  urgency_score?: number;
+  impact_score?: number;
+  recurrence_score?: number;
+  sentiment_score?: number;
+  ai_explanation?: string;
+  ai_model_version?: string;
+  score_source?: string;
+  ai_breakdown?: {
+    recurrence_count?: number;
+    local_cluster_count?: number;
+    social_mentions?: number;
+    qwen_reasoning?: string;
+    qwen_fallback_reason?: string;
+  };
   input_mode: string;
   created_at: string;
 }
@@ -27,9 +44,25 @@ interface TrackedComplaint {
   ticket_id: string;
   title: string;
   priority: string;
+  effective_priority?: string;
   category: string;
   ward: string;
   ai_score: number;
+  effective_ai_score?: number;
+  urgency_score?: number;
+  impact_score?: number;
+  recurrence_score?: number;
+  sentiment_score?: number;
+  ai_explanation?: string;
+  ai_model_version?: string;
+  score_source?: string;
+  ai_breakdown?: {
+    recurrence_count?: number;
+    local_cluster_count?: number;
+    social_mentions?: number;
+    qwen_reasoning?: string;
+    qwen_fallback_reason?: string;
+  };
   status: string;
   assigned_authority?: string;
   authority_response?: string;
@@ -43,7 +76,24 @@ interface MyComplaint {
   category: string;
   ward: string;
   priority: string;
+  effective_priority?: string;
   status: string;
+  ai_score?: number;
+  effective_ai_score?: number;
+  urgency_score?: number;
+  impact_score?: number;
+  recurrence_score?: number;
+  sentiment_score?: number;
+  ai_explanation?: string;
+  ai_model_version?: string;
+  score_source?: string;
+  ai_breakdown?: {
+    recurrence_count?: number;
+    local_cluster_count?: number;
+    social_mentions?: number;
+    qwen_reasoning?: string;
+    qwen_fallback_reason?: string;
+  };
   assigned_authority?: string;
   authority_response?: string;
   citizen_update?: string;
@@ -103,7 +153,10 @@ function safeStorageRemove(key: string): void {
 }
 
 export default function CitizenPortal() {
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010';
+  const API_BASE = useMemo(
+    () => getBackendBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL),
+    [],
+  );
 
   const [tab, setTab] = useState<'file' | 'track'>('file');
   const [contactPhone, setContactPhone] = useState('');
@@ -119,9 +172,13 @@ export default function CitizenPortal() {
   const [voiceFile, setVoiceFile] = useState<File | null>(null);
   const [voiceFileProcessing, setVoiceFileProcessing] = useState(false);
   const [voiceFileMessage, setVoiceFileMessage] = useState('');
+  const [voiceExtractSource, setVoiceExtractSource] = useState('');
+  const [voiceExtractModel, setVoiceExtractModel] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoExtractLoading, setPhotoExtractLoading] = useState(false);
   const [photoExtractMessage, setPhotoExtractMessage] = useState('');
+  const [photoExtractSource, setPhotoExtractSource] = useState('');
+  const [photoExtractModel, setPhotoExtractModel] = useState('');
   const [photoMediaPath, setPhotoMediaPath] = useState('');
   const [voiceMediaPath, setVoiceMediaPath] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -245,8 +302,18 @@ export default function CitizenPortal() {
             category: c.category || '',
             ward: c.ward || '',
             priority: c.priority || 'P3',
+            effective_priority: c.effective_priority || c.priority || 'P3',
             status: c.status || 'open',
             ai_score: c.ai_score || 0,
+            effective_ai_score: c.effective_ai_score || c.ai_score || 0,
+            urgency_score: c.urgency_score || 0,
+            impact_score: c.impact_score || 0,
+            recurrence_score: c.recurrence_score || 0,
+            sentiment_score: c.sentiment_score || 0,
+            ai_explanation: c.ai_explanation || '',
+            ai_model_version: c.ai_model_version || '',
+            score_source: c.score_source || 'heuristic_fallback',
+            ai_breakdown: c.ai_breakdown || undefined,
             input_mode: c.input_mode || 'text',
             created_at: c.created_at || '',
           })));
@@ -325,6 +392,8 @@ export default function CitizenPortal() {
 
     setPhotoExtractLoading(true);
     setPhotoExtractMessage('');
+    setPhotoExtractSource('');
+    setPhotoExtractModel('');
 
     try {
       const imageData = new FormData();
@@ -354,9 +423,18 @@ export default function CitizenPortal() {
         setCategory(String(payload.category));
       }
 
+      const source = String(payload?.image_description_source || payload?.ai?.image_description_source || '').trim();
+      const model = String(payload?.image_description_model || payload?.ai?.image_description_model || '').trim();
+      setPhotoExtractSource(source);
+      setPhotoExtractModel(model);
+
       if (generatedDescription) {
         setDescription(generatedDescription);
-        setPhotoExtractMessage('AI extracted problem description from photo. You can edit it before submit.');
+        if (source === 'qwen') {
+          setPhotoExtractMessage('Qwen generated the complaint description from your photo. You can edit it before submit.');
+        } else {
+          setPhotoExtractMessage('Photo analyzed and description generated using fallback AI logic. You can edit it before submit.');
+        }
       } else {
         setPhotoExtractMessage('Image analyzed, but description could not be generated. Please add details manually.');
       }
@@ -375,6 +453,8 @@ export default function CitizenPortal() {
 
     setVoiceFileProcessing(true);
     setVoiceFileMessage('');
+    setVoiceExtractSource('');
+    setVoiceExtractModel('');
 
     try {
       const form = new FormData();
@@ -409,7 +489,16 @@ export default function CitizenPortal() {
         setVoiceMediaPath(String(payload.source_media_path));
       }
 
-      setVoiceFileMessage('Audio uploaded and transcribed. You can edit details before submit.');
+      const source = String(payload?.voice_description_source || payload?.ai?.voice_description_source || payload?.speech?.transcription_source || '').trim();
+      const model = String(payload?.voice_description_model || payload?.ai?.voice_description_model || payload?.speech?.transcription_model || '').trim();
+      setVoiceExtractSource(source);
+      setVoiceExtractModel(model);
+
+      if (source === 'whisper') {
+        setVoiceFileMessage('Whisper transcribed your audio. You can edit details before submit.');
+      } else {
+        setVoiceFileMessage('Audio transcribed using fallback speech pipeline. You can edit details before submit.');
+      }
     } catch {
       setVoiceFileMessage('Failed to contact voice extraction service.');
     } finally {
@@ -590,7 +679,7 @@ export default function CitizenPortal() {
         return;
       }
 
-      const res = await fetch(`${API_BASE}/api/complaints/`, {
+      const res = await fetch(`${API_BASE}/api/complaints`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -623,10 +712,14 @@ export default function CitizenPortal() {
         setVoiceTranscribeError('');
         setVoiceFile(null);
         setVoiceFileMessage('');
+        setVoiceExtractSource('');
+        setVoiceExtractModel('');
         setVoiceMediaPath('');
         setPhotoFile(null);
         setPhotoMediaPath('');
         setPhotoExtractMessage('');
+        setPhotoExtractSource('');
+        setPhotoExtractModel('');
       } else {
         const detail = await parseErrorMessage(res);
         if (res.status === 401) {
@@ -638,7 +731,18 @@ export default function CitizenPortal() {
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      alert(`Cannot process complaint: ${message}`);
+      const browserOrigin = typeof window !== 'undefined' ? window.location.origin : 'unknown';
+      const apiHint = `${API_BASE}/health`;
+      alert(
+        `Cannot process complaint: ${message}\n\n` +
+        `Likely causes:\n` +
+        `1) Backend URL not reachable from browser\n` +
+        `2) CORS origin not allowed\n` +
+        `3) HTTPS/HTTP mismatch between frontend and backend\n\n` +
+        `Frontend origin: ${browserOrigin}\n` +
+        `Backend base: ${API_BASE}\n` +
+        `Quick check: open ${apiHint}`
+      );
     } finally {
       setInputProcessing(false);
       setSubmitting(false);
@@ -815,10 +919,14 @@ export default function CitizenPortal() {
                             setVoiceTranscribeError('');
                             setVoiceFile(null);
                             setVoiceFileMessage('');
+                            setVoiceExtractSource('');
+                            setVoiceExtractModel('');
                             setVoiceMediaPath('');
                             setPhotoFile(null);
                             setPhotoMediaPath('');
                             setPhotoExtractMessage('');
+                            setPhotoExtractSource('');
+                            setPhotoExtractModel('');
                           }}
                           style={{
                             flex: 1,
@@ -947,11 +1055,23 @@ export default function CitizenPortal() {
                               disabled={!voiceFile || voiceFileProcessing || submitting || inputProcessing}
                               style={{ marginTop: 10 }}
                             >
-                              {voiceFileProcessing ? '⏳ Transcribing uploaded audio...' : '🧠 Extract from Uploaded Audio'}
+                              {voiceFileProcessing ? '⏳ Transcribing with Whisper STT...' : '🧠 Extract with Whisper STT'}
                             </button>
                             {voiceFileMessage && (
                               <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                                 {voiceFileMessage}
+                              </div>
+                            )}
+                            {voiceExtractSource && (
+                              <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                <span className="chip" style={{ fontSize: '0.68rem' }}>
+                                  Voice Engine: {voiceExtractSource === 'whisper' ? 'Whisper STT' : 'Speech Fallback'}
+                                </span>
+                                {voiceExtractModel && (
+                                  <span className="chip" style={{ fontSize: '0.68rem' }}>
+                                    Model: {voiceExtractModel}
+                                  </span>
+                                )}
                               </div>
                             )}
                           </div>
@@ -979,11 +1099,23 @@ export default function CitizenPortal() {
                             disabled={!photoFile || photoExtractLoading || submitting || inputProcessing}
                             style={{ marginTop: 10 }}
                           >
-                            {photoExtractLoading ? '⏳ Extracting from image...' : '🧠 Extract Problem Description from Photo'}
+                            {photoExtractLoading ? '⏳ Extracting with Qwen LLM...' : '🧠 Extract with Qwen LLM'}
                           </button>
                           {photoExtractMessage && (
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 8 }}>
                               {photoExtractMessage}
+                            </div>
+                          )}
+                          {photoExtractSource && (
+                            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                              <span className="chip" style={{ fontSize: '0.68rem' }}>
+                                Description Engine: {photoExtractSource === 'qwen' ? 'Qwen' : 'Fallback'}
+                              </span>
+                              {photoExtractModel && (
+                                <span className="chip" style={{ fontSize: '0.68rem' }}>
+                                  Model: {photoExtractModel}
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1094,7 +1226,7 @@ export default function CitizenPortal() {
                         <div style={{ fontSize: '0.8rem', color: 'var(--accent-blue-light)', fontWeight: 600 }}>{trackedResult.ticket_id}</div>
                         <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{trackedResult.title}</div>
                       </div>
-                      <span className={`badge badge-${trackedResult.priority?.toLowerCase()}`}>{trackedResult.priority}</span>
+                      <span className={`badge badge-${(trackedResult.effective_priority || trackedResult.priority)?.toLowerCase()}`}>{trackedResult.effective_priority || trackedResult.priority}</span>
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
@@ -1108,12 +1240,43 @@ export default function CitizenPortal() {
                       </div>
                       <div style={{ background: 'var(--bg-tertiary)', borderRadius: 8, padding: 12 }}>
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>AI Score</div>
-                        <div style={{ fontWeight: 600, color: 'var(--accent-blue-light)' }}>{trackedResult.ai_score}/100</div>
+                        <div style={{ fontWeight: 600, color: 'var(--accent-blue-light)' }}>{Math.round(trackedResult.effective_ai_score || trackedResult.ai_score)}/100</div>
                       </div>
                       <div style={{ background: 'var(--bg-tertiary)', borderRadius: 8, padding: 12 }}>
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>Status</div>
                         <div style={{ fontWeight: 600, textTransform: 'capitalize' }}>{trackedResult.status?.replace('_', ' ')}</div>
                       </div>
+                    </div>
+
+                    <div style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 10, padding: 12, marginBottom: 16 }}>
+                      <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--accent-blue-light)', marginBottom: 8 }}>AI TRIAGE BREAKDOWN</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                        <span className="chip" style={{ fontSize: '0.68rem' }}>
+                          Engine: {trackedResult.score_source === 'qwen' ? 'Qwen LLM' : 'Heuristic Fallback'}
+                        </span>
+                        {trackedResult.ai_model_version && (
+                          <span className="chip" style={{ fontSize: '0.68rem' }}>Model: {trackedResult.ai_model_version}</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8, marginBottom: 8 }}>
+                        <div><strong>Urgency:</strong> {Math.round(trackedResult.urgency_score || 0)}</div>
+                        <div><strong>Impact:</strong> {Math.round(trackedResult.impact_score || 0)}</div>
+                        <div><strong>Recurrence:</strong> {Math.round(trackedResult.recurrence_score || 0)}</div>
+                        <div><strong>Sentiment:</strong> {Math.round(trackedResult.sentiment_score || 0)}</div>
+                      </div>
+                      {(trackedResult.ai_breakdown?.recurrence_count || trackedResult.ai_breakdown?.local_cluster_count) ? (
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: 6 }}>
+                          Repeat reports: {trackedResult.ai_breakdown?.recurrence_count || 0} • Nearby similar issues: {trackedResult.ai_breakdown?.local_cluster_count || 0}
+                        </div>
+                      ) : null}
+                      {trackedResult.ai_explanation && (
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{trackedResult.ai_explanation}</div>
+                      )}
+                      {trackedResult.ai_breakdown?.qwen_reasoning && (
+                        <div style={{ marginTop: 6, fontSize: '0.78rem', color: '#0f766e' }}>
+                          Qwen reasoning: {trackedResult.ai_breakdown.qwen_reasoning}
+                        </div>
+                      )}
                     </div>
 
                     {/* Status Timeline */}
@@ -1209,6 +1372,11 @@ export default function CitizenPortal() {
                               <div style={{ fontSize: '0.78rem', color: 'var(--accent-blue-light)', fontWeight: 600 }}>{c.ticket_id}</div>
                               <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>{c.title}</div>
                               <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>{c.category} · {c.ward}</div>
+                              {typeof c.effective_ai_score === 'number' && (
+                                <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                                  AI {Math.round(c.effective_ai_score)}/100 • {c.effective_priority || c.priority} • {c.score_source === 'qwen' ? 'Qwen' : 'Fallback'}
+                                </div>
+                              )}
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ fontSize: '0.78rem', color: solved ? '#16a34a' : (sConfig?.color || '#64748b'), fontWeight: 700 }}>
@@ -1254,6 +1422,8 @@ export default function CitizenPortal() {
                           <span style={{ fontSize: '0.8rem', color: 'var(--accent-blue-light)', fontWeight: 600 }}>{c.id || c.ticket_id}</span>
                           <span className={`badge badge-${c.priority?.toLowerCase()}`} style={{ fontSize: '0.65rem', padding: '2px 6px' }}>{c.priority}</span>
                           {c.ai_score > 0 && <span style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)' }}>AI: {c.ai_score}</span>}
+                          {typeof c.effective_ai_score === 'number' && <span style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)' }}>Effective: {Math.round(c.effective_ai_score)}</span>}
+                          <span style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)' }}>{c.score_source === 'qwen' ? 'Qwen' : 'Fallback'}</span>
                         </div>
                         <div style={{ fontSize: '0.9rem' }}>{c.title}</div>
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>{c.category} · {c.ward}</div>

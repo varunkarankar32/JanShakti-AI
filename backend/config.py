@@ -11,8 +11,12 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")  # tiny, base, small, medium,
 YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "ml/weights/yolov8_damage.pt")
 CLASSIFIER_MODEL_PATH = os.getenv("CLASSIFIER_MODEL_PATH", "ml/weights/classifier.pkl")
 SENTIMENT_MODEL = os.getenv("SENTIMENT_MODEL", "distilbert-base-uncased-finetuned-sst-2-english")
+QWEN_PRIORITY_ENABLED = os.getenv("QWEN_PRIORITY_ENABLED", "true").lower() == "true"
+QWEN_PRIORITY_MODEL = os.getenv("QWEN_PRIORITY_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+QWEN_PRIORITY_MAX_NEW_TOKENS = int(os.getenv("QWEN_PRIORITY_MAX_NEW_TOKENS", "220"))
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 API_PREFIX = "/api"
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
 
 # Auth / JWT
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-in-production")

@@ -10,7 +10,21 @@ interface AuthorityComplaint {
   category: string;
   ward: string;
   priority: 'P0' | 'P1' | 'P2' | 'P3' | string;
+  effective_priority?: 'P0' | 'P1' | 'P2' | 'P3' | string;
   status: string;
+  ai_score?: number | null;
+  effective_ai_score?: number | null;
+  urgency_score?: number | null;
+  impact_score?: number | null;
+  recurrence_score?: number | null;
+  sentiment_score?: number | null;
+  ai_explanation?: string | null;
+  ai_model_version?: string | null;
+  ai_breakdown?: {
+    recurrence_count?: number;
+    local_cluster_count?: number;
+    social_mentions?: number;
+  } | null;
   assigned_authority?: string | null;
   authority_email?: string | null;
   leader_note?: string | null;
@@ -345,10 +359,32 @@ export default function AuthorityPage() {
   };
 
   const runAiVerification = async () => {
-    if (!selectedComplaint) return;
-    const ok = await runAction(`/api/complaints/${selectedComplaint.ticket_id}/verification/run`);
-    if (ok) {
-      setFeedback('✓ AI verification run completed. Leader can now close or request rework.');
+    if (!selectedComplaint || !token) return;
+    setLoadingAction(true);
+    setFeedback('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/complaints/${selectedComplaint.ticket_id}/verification/run`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const detail = await parseDetail(res);
+        setFeedback(`✕ ${detail}`);
+        return;
+      }
+
+      const payload = await res.json();
+      const engine = payload?.verification_engine ? ` via ${payload.verification_engine}` : '';
+      const model = payload?.verification_model ? ` (${payload.verification_model})` : '';
+      setFeedback(`✓ AI verification ${payload.verification_status} (score ${payload.verification_score}/100)${engine}${model}. Leader can now close or request rework.`);
+      await fetchQueue();
+      await fetchSelectedDetail();
+    } catch {
+      setFeedback('✕ Verification action failed. Please try again.');
+    } finally {
+      setLoadingAction(false);
     }
   };
 
@@ -472,7 +508,9 @@ export default function AuthorityPage() {
                       <span style={{ fontSize: 12, color: statusMeta.color, fontWeight: 700 }}>{statusMeta.label}</span>
                     </div>
                     <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{item.title}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 6 }}>{item.ward} • {item.category} • {item.priority}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 6 }}>
+                      {item.ward} • {item.category} • {item.effective_priority || item.priority} • AI {Math.round(item.effective_ai_score ?? item.ai_score ?? 0)}
+                    </div>
                   </button>
                 );
               })}
@@ -494,8 +532,44 @@ export default function AuthorityPage() {
                   <h2 style={{ margin: 0 }}>{selectedComplaint.ticket_id} • {selectedComplaint.title}</h2>
                   <p style={{ color: 'var(--text-secondary)' }}>{selectedComplaint.description}</p>
                   <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
-                    {selectedComplaint.ward} • {selectedComplaint.category} • Priority {selectedComplaint.priority}
+                    {selectedComplaint.ward} • {selectedComplaint.category} • Priority {selectedComplaint.effective_priority || selectedComplaint.priority}
                   </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 10, display: 'grid', gap: 8 }}>
+                  <h3 style={{ margin: 0 }}>AI Priority Intelligence</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
+                    <div className="glass-card" style={{ padding: 10 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>AI Score</div>
+                      <strong>{Math.round(selectedComplaint.effective_ai_score ?? selectedComplaint.ai_score ?? 0)}/100</strong>
+                    </div>
+                    <div className="glass-card" style={{ padding: 10 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Urgency</div>
+                      <strong>{Math.round(selectedComplaint.urgency_score ?? 0)}</strong>
+                    </div>
+                    <div className="glass-card" style={{ padding: 10 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Impact</div>
+                      <strong>{Math.round(selectedComplaint.impact_score ?? 0)}</strong>
+                    </div>
+                    <div className="glass-card" style={{ padding: 10 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Recurrence</div>
+                      <strong>{Math.round(selectedComplaint.recurrence_score ?? 0)}</strong>
+                    </div>
+                    <div className="glass-card" style={{ padding: 10 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Sentiment Pressure</div>
+                      <strong>{Math.round(selectedComplaint.sentiment_score ?? 0)}</strong>
+                    </div>
+                  </div>
+                  {selectedComplaint.ai_breakdown && (
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                      Nearby cluster: {selectedComplaint.ai_breakdown.local_cluster_count ?? 0} • Repeat reports: {selectedComplaint.ai_breakdown.recurrence_count ?? 0}
+                    </div>
+                  )}
+                  {selectedComplaint.ai_explanation && (
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 8, padding: 10 }}>
+                      {selectedComplaint.ai_explanation}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 10, display: 'grid', gap: 8 }}>

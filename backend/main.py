@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 
-from config import API_PREFIX, UPLOAD_DIR
+from config import API_PREFIX, CORS_ORIGINS, UPLOAD_DIR
 from database import init_db
 
 # Create upload directory
@@ -24,11 +24,34 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+
+def _resolve_cors_origins(raw_value: str):
+    raw = (raw_value or "*").strip()
+    if raw == "*":
+        return ["*"]
+
+    configured = [item.strip() for item in raw.split(",") if item.strip()]
+    local_dev = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ]
+
+    # Keep local frontend origins whitelisted so local debugging does not fail
+    # when production CORS origins are configured via environment variables.
+    merged = configured + [origin for origin in local_dev if origin not in configured]
+    return merged
+
+
+cors_origins = _resolve_cors_origins(CORS_ORIGINS)
+allow_credentials = cors_origins != ["*"]
+
 # CORS — allow Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allow all origins for Vercel/HF Spaces
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

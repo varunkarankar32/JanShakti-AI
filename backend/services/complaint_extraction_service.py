@@ -9,6 +9,7 @@ import re
 from services.nlp_service import nlp_service
 from services.speech_service import speech_service
 from services.vision_service import vision_service
+from services.qwen_priority_service import qwen_priority_service
 
 
 VISION_TO_CATEGORY = {
@@ -114,21 +115,92 @@ class ComplaintExtractionService:
                 labels.append(cls_name)
         return ", ".join(labels[:3])
 
+    def _looks_like_fabricated_address(self, text: str) -> bool:
+        # Reject likely hallucinated full postal addresses for image-only extraction.
+        pattern = r"\b\d{2,6}\s+[A-Za-z0-9.\- ]+\s(?:st|street|rd|road|ave|avenue|blvd|boulevard|ln|lane|dr|drive)\b"
+        return bool(re.search(pattern, text, flags=re.IGNORECASE))
+
+    def _category_keywords(self, mapped_category: str, detected_category: str) -> list[str]:
+        base_map = {
+            "Roads & Potholes": ["road", "pothole", "crack", "damage", "surface"],
+            "Garbage & Sanitation": ["garbage", "waste", "trash", "sanitation", "dump"],
+            "Water Supply": ["water", "pipe", "leak", "supply", "tap"],
+            "Drainage": ["drain", "drainage", "sewer", "waterlogging", "overflow"],
+            "Electricity": ["streetlight", "street light", "light", "lamp", "electric", "power", "pole"],
+            "Safety & Security": ["unsafe", "fallen", "tree", "wall", "hazard", "danger"],
+            "Others": ["issue", "infrastructure", "public"],
+        }
+
+        tokens = list(base_map.get(mapped_category, base_map["Others"]))
+        detected_tokens = [part.strip().lower() for part in re.split(r"[\s_\-/]+", detected_category or "") if part.strip()]
+        for token in detected_tokens:
+            if token not in tokens and len(token) > 2:
+                tokens.append(token)
+        return tokens
+
+    def _is_relevant_qwen_image_text(
+        self,
+        text: str,
+        mapped_category: str,
+        detected_category: str,
+        object_hint: str,
+    ) -> bool:
+        normalized = self._normalize_text(text).lower()
+        if len(normalized) < 20:
+            return False
+
+        keywords = self._category_keywords(mapped_category, detected_category)
+        object_tokens = [tok.strip().lower() for tok in re.split(r"[\s,]+", object_hint or "") if len(tok.strip()) > 2]
+        for tok in object_tokens:
+            if tok not in keywords:
+                keywords.append(tok)
+
+        return any(keyword in normalized for keyword in keywords)
+
     def _build_image_only_description(
         self,
         vision_result: Dict[str, Any],
         mapped_category: str,
-    ) -> str:
+        ward_hint: Optional[str] = None,
+    ) -> tuple[str, str, str]:
         detected_category = str(vision_result.get("category", "Infrastructure Issue") or "Infrastructure Issue")
         severity = str(vision_result.get("severity", "medium") or "medium").lower()
         confidence = float(vision_result.get("confidence", 0.0) or 0.0)
+
+        object_hint = self._format_detected_objects(vision_result)
+        ward = ward_hint or "Ward 1"
+
+        qwen_generated = qwen_priority_service.write_image_complaint(
+            mapped_category=mapped_category,
+            detected_category=detected_category,
+            severity=severity,
+            confidence=confidence,
+            visible_cues=object_hint,
+            ward_hint=ward,
+        )
+
+        if qwen_generated.get("used"):
+            complaint_text = self.refine_complaint_statement(str(qwen_generated.get("complaint_text", "")))
+            urgency_note = str(qwen_generated.get("urgency_note", "")).strip()
+            if urgency_note:
+                complaint_text = self.refine_complaint_statement(f"{complaint_text} {urgency_note}")
+            if self._looks_like_fabricated_address(complaint_text):
+                qwen_generated = {"used": False, "reason": "qwen_output_filtered_address"}
+            elif not self._is_relevant_qwen_image_text(
+                text=complaint_text,
+                mapped_category=mapped_category,
+                detected_category=detected_category,
+                object_hint=object_hint,
+            ):
+                qwen_generated = {"used": False, "reason": "qwen_output_filtered_irrelevant"}
+            else:
+                return complaint_text, "qwen", str(qwen_generated.get("model", ""))
 
         template = CATEGORY_DESCRIPTION_TEMPLATES.get(
             mapped_category,
             CATEGORY_DESCRIPTION_TEMPLATES["Others"],
         )
         severity_hint = SEVERITY_HINTS.get(severity, SEVERITY_HINTS["medium"])
-        object_hint = self._format_detected_objects(vision_result)
 
         description = (
             f"{template} "
@@ -139,7 +211,7 @@ class ComplaintExtractionService:
         if object_hint:
             description += f" Visible cues: {object_hint}."
 
-        return self.refine_complaint_statement(description)
+        return self.refine_complaint_statement(description), "heuristic_fallback", str(qwen_generated.get("reason", ""))
 
     def extract_from_text(
         self,
@@ -200,8 +272,14 @@ class ComplaintExtractionService:
 
         if not image_only_mode:
             base_text = caption.strip()
+            description_source = "caption"
+            description_model = "user_input"
         else:
-            base_text = self._build_image_only_description(vision_result, mapped_category)
+            base_text, description_source, description_model = self._build_image_only_description(
+                vision_result=vision_result,
+                mapped_category=mapped_category,
+                ward_hint=ward_hint,
+            )
 
         extracted = self.extract_from_text(
             text=base_text,
@@ -212,7 +290,11 @@ class ComplaintExtractionService:
         extracted["ai_detection_result"] = vision_result
         extracted["generated_from_image_only"] = image_only_mode
         extracted["image_problem_description"] = base_text
+        extracted["image_description_source"] = description_source
+        extracted["image_description_model"] = description_model
         extracted["filename_hint_category"] = filename_hint_category
+        extracted["ai"]["image_description_source"] = description_source
+        extracted["ai"]["image_description_model"] = description_model
         return extracted
 
     def extract_from_voice(
@@ -234,7 +316,13 @@ class ComplaintExtractionService:
             ward_hint=ward_hint,
             source="voice",
         )
+        transcription_source = str(speech_result.get("transcription_source") or "unknown")
+        transcription_model = str(speech_result.get("transcription_model") or "unknown")
         extracted["transcript"] = transcript
+        extracted["voice_description_source"] = transcription_source
+        extracted["voice_description_model"] = transcription_model
+        extracted["ai"]["voice_description_source"] = transcription_source
+        extracted["ai"]["voice_description_model"] = transcription_model
         extracted["speech"] = speech_result
         return extracted
 

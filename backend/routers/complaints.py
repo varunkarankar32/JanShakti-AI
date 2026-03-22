@@ -32,7 +32,6 @@ from routers.auth import (
     get_current_user,
 )
 from services.priority_engine import priority_engine
-from services.sentiment_service import sentiment_service
 from services.complaint_extraction_service import complaint_extraction_service
 from services.whatsapp_service import whatsapp_bot
 from config import SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_EMAIL, SMTP_USE_TLS, UPLOAD_DIR
@@ -293,6 +292,108 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
+def _local_cluster_count(
+    db: Session,
+    ward: str,
+    category: str,
+    latitude: Optional[float],
+    longitude: Optional[float],
+    radius_m: float = 1200.0,
+) -> int:
+    """Estimate nearby unresolved complaint density for locality-level recurrence signal."""
+    if latitude is None or longitude is None:
+        return 0
+
+    recent_rows = (
+        db.query(Complaint)
+        .filter(Complaint.ward == ward)
+        .filter(Complaint.category == category)
+        .filter(Complaint.status != ComplaintStatus.RESOLVED)
+        .filter(Complaint.created_at >= datetime.now() - timedelta(days=30))
+        .filter(Complaint.latitude.isnot(None), Complaint.longitude.isnot(None))
+        .all()
+    )
+
+    count = 0
+    for row in recent_rows:
+        if row.latitude is None or row.longitude is None:
+            continue
+        distance = _haversine_m(float(latitude), float(longitude), float(row.latitude), float(row.longitude))
+        if distance <= radius_m:
+            count += 1
+
+    return count
+
+
+def _score_source_from_breakdown(ai_breakdown: Optional[str]) -> str:
+    if not ai_breakdown:
+        return "heuristic_fallback"
+
+    try:
+        payload = json.loads(ai_breakdown)
+    except Exception:
+        return "heuristic_fallback"
+
+    if payload.get("qwen_reasoning"):
+        return "qwen"
+    return "heuristic_fallback"
+
+
+def _verification_explanation(complaint: Complaint) -> str:
+    score = complaint.verification_score
+    confidence = complaint.verification_confidence
+    status = (complaint.verification_status or "pending_review").lower()
+
+    if score is None:
+        return (
+            "Authority marked this issue complete and uploaded evidence. "
+            "AI verification has not been run yet. Leader should run AI Verify before closing."
+        )
+
+    confidence_text = f" with confidence {round(float(confidence), 1)}%" if confidence is not None else ""
+    if status == "verified":
+        return (
+            f"AI verification passed with score {round(float(score), 1)}/100{confidence_text}. "
+            "Before/after evidence appears consistent for leader review."
+        )
+
+    if status == "flagged":
+        return (
+            f"AI verification flagged this evidence at {round(float(score), 1)}/100{confidence_text}. "
+            "Leader should request rework or additional proof before resolution."
+        )
+
+    return (
+        f"AI verification status is {status} at {round(float(score), 1)}/100{confidence_text}. "
+        "Leader confirmation is still required."
+    )
+
+
+def _read_media_from_path(raw_path: Optional[str]) -> tuple[Optional[bytes], Optional[str]]:
+    """Resolve and read a local media path saved in complaint payload."""
+    if not raw_path:
+        return None, None
+
+    raw = str(raw_path).strip()
+    if not raw:
+        return None, None
+
+    candidates = []
+    p = Path(raw)
+    candidates.append(p)
+    candidates.append(Path(raw.lstrip("/")))
+    candidates.append(Path(UPLOAD_DIR) / p.name)
+
+    for candidate in candidates:
+        try:
+            if candidate.exists() and candidate.is_file():
+                return candidate.read_bytes(), candidate.name
+        except Exception:
+            continue
+
+    return None, None
+
+
 def _compute_visual_change(before_path: str, after_path: str) -> dict:
     img_before = cv2.imread(before_path)
     img_after = cv2.imread(after_path)
@@ -396,6 +497,8 @@ def _verification_summary(complaint: Complaint) -> dict:
         "status": status,
         "verification_score": final_score,
         "verification_confidence": round(min(99.0, confidence), 1),
+        "verification_engine": "cv_verification_v1",
+        "verification_model": "opencv_diff_hist",
         "components": {
             "visual_score": round(visual_score, 1),
             "geo_score": round(geo_score, 1),
@@ -473,10 +576,6 @@ def _apply_starvation_escalation(db: Session):
     changed = False
     for complaint in active:
         effective_score, effective_priority, _, _ = _effective_priority_snapshot(complaint)
-        if effective_score > float(complaint.ai_score or 0.0):
-            complaint.ai_score = effective_score
-            changed = True
-
         if complaint.priority is None or complaint.priority.value != effective_priority:
             complaint.priority = PriorityLevel(effective_priority)
             changed = True
@@ -508,6 +607,68 @@ def create_complaint(
     category = complaint.category if complaint.category else extracted["category"]
     ai_meta = extracted.get("ai", {})
 
+    media_context_notes = []
+
+    # Re-read citizen media from server storage so image/audio understanding is always
+    # available for scoring, even if frontend submitted only a short placeholder text.
+    image_bytes, image_name = _read_media_from_path(complaint.image_path)
+    if image_bytes:
+        try:
+            image_extracted = complaint_extraction_service.extract_from_image(
+                image_bytes=image_bytes,
+                caption=refined_description,
+                ward_hint=complaint.ward,
+                image_name=image_name,
+            )
+            visual_statement = str(
+                image_extracted.get("image_problem_description") or image_extracted.get("description") or ""
+            ).strip()
+            if visual_statement:
+                media_context_notes.append(f"Image analysis: {visual_statement[:240]}")
+
+            detection = image_extracted.get("ai_detection_result")
+            if detection:
+                det_category = str(detection.get("category", "Unknown"))
+                det_severity = str(detection.get("severity", "unknown"))
+                det_conf = detection.get("confidence")
+                conf_text = f" ({round(float(det_conf) * 100, 1)}% conf)" if det_conf is not None else ""
+                media_context_notes.append(
+                    f"Image detected {det_category} with {det_severity} severity{conf_text}."
+                )
+                ai_meta["image_detection"] = detection
+
+            if not complaint.category and image_extracted.get("category"):
+                category = str(image_extracted.get("category"))
+        except Exception as exc:
+            media_context_notes.append(f"Image analysis unavailable: {str(exc)[:120]}")
+
+    audio_bytes, audio_name = _read_media_from_path(complaint.audio_path)
+    if audio_bytes:
+        try:
+            ext = Path(audio_name or "voice.wav").suffix.lower().lstrip(".") or "wav"
+            voice_extracted = complaint_extraction_service.extract_from_voice(
+                audio_bytes=audio_bytes,
+                file_extension=ext,
+                ward_hint=complaint.ward,
+            )
+            transcript = str(voice_extracted.get("transcript") or "").strip()
+            if transcript:
+                media_context_notes.append(f"Audio transcript: {transcript[:280]}")
+            speech_meta = voice_extracted.get("speech")
+            if speech_meta:
+                ai_meta["speech"] = speech_meta
+        except Exception as exc:
+            media_context_notes.append(f"Audio transcription unavailable: {str(exc)[:120]}")
+
+    scoring_text = refined_description
+    if media_context_notes:
+        media_block = "\n".join(f"- {note}" for note in media_context_notes)
+        scoring_text = f"{refined_description}\n\nAI Media Context:\n{media_block}"
+        ai_meta["media_context_notes"] = media_context_notes
+
+        # Persist a concise written media explanation with the complaint content.
+        refined_description = f"{refined_description}\n\nAI Media Summary: {media_context_notes[0]}"
+
     recurrence_count = (
         db.query(Complaint)
         .filter(Complaint.ward == complaint.ward)
@@ -516,15 +677,22 @@ def create_complaint(
         .filter(Complaint.created_at >= datetime.now() - timedelta(days=30))
         .count()
     )
+    local_cluster_count = _local_cluster_count(
+        db=db,
+        ward=complaint.ward,
+        category=category,
+        latitude=complaint.latitude,
+        longitude=complaint.longitude,
+    )
 
     priority_result = priority_engine.calculate_score(
-        text=refined_description,
+        text=scoring_text,
         category=category,
         ward=complaint.ward,
         recurrence_count=recurrence_count,
+        local_cluster_count=local_cluster_count,
         social_mentions=0,
     )
-    _ = sentiment_service.analyze(refined_description)
 
     priority_level = PriorityLevel(priority_result["priority"])
     input_mode = InputMode(complaint.input_mode) if complaint.input_mode in [e.value for e in InputMode] else InputMode.TEXT
@@ -552,6 +720,9 @@ def create_complaint(
         sentiment_score=priority_result["sentiment"],
         ai_category=ai_meta.get("category"),
         ai_entities=json.dumps(ai_meta),
+        ai_breakdown=json.dumps(priority_result.get("breakdown", {})),
+        ai_explanation=priority_result.get("explanation"),
+        ai_model_version=priority_result.get("model_version"),
         status=ComplaintStatus.OPEN,
         input_mode=input_mode,
         citizen_update=_build_citizen_update(
@@ -573,7 +744,31 @@ def create_complaint(
     )
     db.commit()
     db.refresh(db_complaint)
-    return db_complaint
+    return {
+        "id": db_complaint.id,
+        "ticket_id": db_complaint.ticket_id,
+        "title": db_complaint.title,
+        "description": db_complaint.description,
+        "category": db_complaint.category,
+        "ward": db_complaint.ward,
+        "location": db_complaint.location,
+        "priority": db_complaint.priority.value if db_complaint.priority else "P3",
+        "ai_score": db_complaint.ai_score,
+        "urgency_score": db_complaint.urgency_score,
+        "impact_score": db_complaint.impact_score,
+        "recurrence_score": db_complaint.recurrence_score,
+        "sentiment_score": db_complaint.sentiment_score,
+        "ai_category": db_complaint.ai_category,
+        "ai_breakdown": json.loads(db_complaint.ai_breakdown) if db_complaint.ai_breakdown else None,
+        "ai_explanation": db_complaint.ai_explanation,
+        "ai_model_version": db_complaint.ai_model_version,
+        "score_source": _score_source_from_breakdown(db_complaint.ai_breakdown),
+        "status": db_complaint.status.value if db_complaint.status else "open",
+        "input_mode": db_complaint.input_mode.value if db_complaint.input_mode else "text",
+        "assigned_to": db_complaint.assigned_to,
+        "created_at": db_complaint.created_at,
+        "rating": db_complaint.rating,
+    }
 
 
 @router.post("/extract/text")
@@ -690,6 +885,14 @@ def list_complaints(
                 "ward": c.ward,
                 "priority": c.priority.value if c.priority else "P3",
                 "ai_score": c.ai_score,
+                "urgency_score": c.urgency_score,
+                "impact_score": c.impact_score,
+                "recurrence_score": c.recurrence_score,
+                "sentiment_score": c.sentiment_score,
+                "ai_explanation": c.ai_explanation,
+                "ai_model_version": c.ai_model_version,
+                "score_source": _score_source_from_breakdown(c.ai_breakdown),
+                "ai_breakdown": json.loads(c.ai_breakdown) if c.ai_breakdown else None,
                 "effective_ai_score": eff[0],
                 "effective_priority": eff[1],
                 "starvation_bonus": eff[2],
@@ -708,6 +911,8 @@ def list_complaints(
                 "verification_status": c.verification_status,
                 "verification_score": c.verification_score,
                 "verification_confidence": c.verification_confidence,
+                "verification_engine": "cv_verification_v1" if c.verification_status else None,
+                "verification_model": "opencv_diff_hist" if c.verification_status else None,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
                 "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
                 "rating": c.rating,
@@ -743,6 +948,15 @@ def list_my_complaints(
                 "category": c.category,
                 "ward": c.ward,
                 "priority": c.priority.value if c.priority else "P3",
+                "ai_score": c.ai_score,
+                "urgency_score": c.urgency_score,
+                "impact_score": c.impact_score,
+                "recurrence_score": c.recurrence_score,
+                "sentiment_score": c.sentiment_score,
+                "ai_explanation": c.ai_explanation,
+                "ai_model_version": c.ai_model_version,
+                "score_source": _score_source_from_breakdown(c.ai_breakdown),
+                "ai_breakdown": json.loads(c.ai_breakdown) if c.ai_breakdown else None,
                 "status": c.status.value if c.status else "open",
                 "effective_priority": _effective_priority_snapshot(c)[1],
                 "effective_ai_score": _effective_priority_snapshot(c)[0],
@@ -755,6 +969,9 @@ def list_my_complaints(
                 "audio_path": c.audio_path,
                 "verification_status": c.verification_status,
                 "verification_score": c.verification_score,
+                "verification_confidence": c.verification_confidence,
+                "verification_engine": "cv_verification_v1" if c.verification_status else None,
+                "verification_model": "opencv_diff_hist" if c.verification_status else None,
                 "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
             }
@@ -798,6 +1015,15 @@ def list_authority_complaints(
                 "category": c.category,
                 "ward": c.ward,
                 "priority": c.priority.value if c.priority else "P3",
+                "ai_score": c.ai_score,
+                "urgency_score": c.urgency_score,
+                "impact_score": c.impact_score,
+                "recurrence_score": c.recurrence_score,
+                "sentiment_score": c.sentiment_score,
+                "ai_explanation": c.ai_explanation,
+                "ai_model_version": c.ai_model_version,
+                "score_source": _score_source_from_breakdown(c.ai_breakdown),
+                "ai_breakdown": json.loads(c.ai_breakdown) if c.ai_breakdown else None,
                 "effective_priority": _effective_priority_snapshot(c)[1],
                 "effective_ai_score": _effective_priority_snapshot(c)[0],
                 "status": c.status.value if c.status else "open",
@@ -811,6 +1037,8 @@ def list_authority_complaints(
                 "verification_status": c.verification_status,
                 "verification_score": c.verification_score,
                 "verification_confidence": c.verification_confidence,
+                "verification_engine": "cv_verification_v1" if c.verification_status else None,
+                "verification_model": "opencv_diff_hist" if c.verification_status else None,
                 "before_photo": c.before_photo,
                 "after_photo": c.after_photo,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
@@ -818,6 +1046,59 @@ def list_authority_complaints(
             }
             for c in complaints
         ],
+    }
+
+
+@router.get("/leader/verification-requests")
+def list_leader_verification_requests(
+    limit: int = 50,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_leader),
+):
+    """Dedicated leader inbox for authority-marked completion and verification requests."""
+    query = db.query(Complaint).filter(
+        Complaint.status == ComplaintStatus.VERIFICATION,
+        Complaint.after_photo.isnot(None),
+    )
+
+    if status:
+        query = query.filter(func.lower(func.coalesce(Complaint.verification_status, "")) == status.strip().lower())
+
+    complaints = query.order_by(desc(Complaint.created_at)).limit(max(1, min(limit, 200))).all()
+
+    payload = []
+    for c in complaints:
+        payload.append(
+            {
+                "ticket_id": c.ticket_id,
+                "title": c.title,
+                "category": c.category,
+                "ward": c.ward,
+                "status": c.status.value if c.status else "verification",
+                "priority": c.priority.value if c.priority else "P3",
+                "effective_priority": _effective_priority_snapshot(c)[1],
+                "effective_ai_score": _effective_priority_snapshot(c)[0],
+                "assigned_authority": c.assigned_authority,
+                "authority_email": c.authority_email,
+                "authority_response": c.authority_response,
+                "before_photo": c.before_photo,
+                "after_photo": c.after_photo,
+                "before_meta": json.loads(c.before_meta) if c.before_meta else None,
+                "after_meta": json.loads(c.after_meta) if c.after_meta else None,
+                "verification_status": c.verification_status,
+                "verification_score": c.verification_score,
+                "verification_confidence": c.verification_confidence,
+                "verification_engine": "cv_verification_v1" if c.verification_status else None,
+                "verification_model": "opencv_diff_hist" if c.verification_status else None,
+                "verification_explanation": _verification_explanation(c),
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+        )
+
+    return {
+        "total": len(payload),
+        "requests": payload,
     }
 
 
@@ -850,6 +1131,10 @@ def get_complaint(ticket_id: str, db: Session = Depends(get_db)):
         "sentiment_score": complaint.sentiment_score,
         "ai_category": complaint.ai_category,
         "ai_entities": json.loads(complaint.ai_entities) if complaint.ai_entities else {},
+        "ai_breakdown": json.loads(complaint.ai_breakdown) if complaint.ai_breakdown else None,
+        "ai_explanation": complaint.ai_explanation,
+        "ai_model_version": complaint.ai_model_version,
+        "score_source": _score_source_from_breakdown(complaint.ai_breakdown),
         "status": complaint.status.value,
         "input_mode": complaint.input_mode.value,
         "assigned_to": complaint.assigned_to,
@@ -866,6 +1151,8 @@ def get_complaint(ticket_id: str, db: Session = Depends(get_db)):
         "verification_status": complaint.verification_status,
         "verification_score": complaint.verification_score,
         "verification_confidence": complaint.verification_confidence,
+        "verification_engine": "cv_verification_v1" if complaint.verification_status else None,
+        "verification_model": "opencv_diff_hist" if complaint.verification_status else None,
         "before_meta": json.loads(complaint.before_meta) if complaint.before_meta else None,
         "after_meta": json.loads(complaint.after_meta) if complaint.after_meta else None,
         "created_at": complaint.created_at.isoformat() if complaint.created_at else None,
@@ -1408,6 +1695,8 @@ def run_verification(
         "verification_status": complaint.verification_status,
         "verification_score": complaint.verification_score,
         "verification_confidence": complaint.verification_confidence,
+        "verification_engine": result.get("verification_engine"),
+        "verification_model": result.get("verification_model"),
         "components": result["components"],
         "reasons": result["reasons"],
     }
@@ -1434,6 +1723,8 @@ def get_verification_details(
         "verification_status": complaint.verification_status,
         "verification_score": complaint.verification_score,
         "verification_confidence": complaint.verification_confidence,
+        "verification_engine": "cv_verification_v1" if complaint.verification_status else None,
+        "verification_model": "opencv_diff_hist" if complaint.verification_status else None,
     }
 
 

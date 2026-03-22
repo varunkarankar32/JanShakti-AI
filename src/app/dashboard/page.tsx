@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { STATUS_CONFIG } from '@/lib/mockData';
 
 interface LiveComplaint {
@@ -11,7 +11,23 @@ interface LiveComplaint {
   category: string;
   ward: string;
   priority: string;
+  effective_priority?: string;
   ai_score: number;
+  effective_ai_score?: number;
+  urgency_score?: number | null;
+  impact_score?: number | null;
+  recurrence_score?: number | null;
+  sentiment_score?: number | null;
+  ai_explanation?: string | null;
+  ai_model_version?: string | null;
+  score_source?: string | null;
+  ai_breakdown?: {
+    recurrence_count?: number;
+    local_cluster_count?: number;
+    social_mentions?: number;
+    qwen_reasoning?: string;
+    qwen_fallback_reason?: string;
+  } | null;
   status: string;
   input_mode: string;
   assigned_to: string | null;
@@ -25,6 +41,8 @@ interface LiveComplaint {
   verification_status?: string | null;
   verification_score?: number | null;
   verification_confidence?: number | null;
+  verification_engine?: string | null;
+  verification_model?: string | null;
   created_at: string | null;
   rating: number | null;
 }
@@ -81,6 +99,29 @@ interface IncidentCluster {
   tickets: string[];
 }
 
+interface VerificationRequestItem {
+  ticket_id: string;
+  title: string;
+  category: string;
+  ward: string;
+  status: string;
+  priority: string;
+  effective_priority?: string;
+  effective_ai_score?: number;
+  assigned_authority?: string | null;
+  authority_email?: string | null;
+  authority_response?: string | null;
+  before_photo?: string | null;
+  after_photo?: string | null;
+  verification_status?: string | null;
+  verification_score?: number | null;
+  verification_confidence?: number | null;
+  verification_engine?: string | null;
+  verification_model?: string | null;
+  verification_explanation?: string | null;
+  created_at?: string | null;
+}
+
 const DEFAULT_KPIS = [
   { label: 'Issues Tracked', value: '0', icon: '📋', color: '#3b82f6', change: 'Live from DB' },
   { label: 'Resolution Rate', value: '0%', icon: '✅', color: '#22c55e', change: 'Resolved / Total' },
@@ -123,6 +164,7 @@ export default function DashboardPage() {
   const [complaints, setComplaints] = useState<LiveComplaint[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [incidents, setIncidents] = useState<IncidentCluster[]>([]);
+  const [verificationRequests, setVerificationRequests] = useState<VerificationRequestItem[]>([]);
   const [backendOnline, setBackendOnline] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [secondsSinceUpdate, setSecondsSinceUpdate] = useState(0);
@@ -147,6 +189,7 @@ export default function DashboardPage() {
   const [geoLon, setGeoLon] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const assignPanelRef = useRef<HTMLDivElement | null>(null);
 
   const handleLeaderLogout = useCallback(() => {
     setLeaderToken('');
@@ -226,10 +269,11 @@ export default function DashboardPage() {
 
     try {
       const headers = { Authorization: `Bearer ${leaderToken}` };
-      const [complaintsRes, statsRes, incidentsRes] = await Promise.all([
+      const [complaintsRes, statsRes, incidentsRes, verificationRes] = await Promise.all([
         fetch(`${API_BASE}/api/complaints?limit=50`, { headers }),
         fetch(`${API_BASE}/api/dashboard/stats`, { headers }),
         fetch(`${API_BASE}/api/complaints/incidents/summary?limit=8`, { headers }),
+        fetch(`${API_BASE}/api/complaints/leader/verification-requests?limit=40`, { headers }),
       ]);
 
       if (statsRes.status === 401 || statsRes.status === 403) {
@@ -259,9 +303,17 @@ export default function DashboardPage() {
       } else {
         setIncidents([]);
       }
+
+      if (verificationRes.ok) {
+        const data = await verificationRes.json();
+        setVerificationRequests(data.requests || []);
+      } else {
+        setVerificationRequests([]);
+      }
     } catch {
       setBackendOnline(false);
       setIncidents([]);
+      setVerificationRequests([]);
     }
   }, [leaderToken, handleLeaderLogout, API_BASE]);
 
@@ -410,7 +462,9 @@ export default function DashboardPage() {
       }
 
       const payload = await res.json();
-      setActionMessage(`✓ Verification ${payload.verification_status} (score ${payload.verification_score}/100)`);
+      const engine = payload?.verification_engine ? ` via ${payload.verification_engine}` : '';
+      const model = payload?.verification_model ? ` (${payload.verification_model})` : '';
+      setActionMessage(`✓ Verification ${payload.verification_status} (score ${payload.verification_score}/100)${engine}${model}`);
       await fetchData();
     } catch {
       setActionMessage('✕ Verification engine failed');
@@ -419,7 +473,24 @@ export default function DashboardPage() {
     }
   };
 
+  const openManagePanel = useCallback((ticketId: string) => {
+    setActiveView('complaints');
+    setSelectedTicket(ticketId);
+    setActionMessage('');
+    setTimeout(() => {
+      assignPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+  }, []);
+
   const selectedComplaint = complaints.find((c) => c.ticket_id === selectedTicket) || null;
+
+  useEffect(() => {
+    if (activeView !== 'complaints' || !selectedTicket) return;
+    const timer = setTimeout(() => {
+      assignPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [activeView, selectedTicket]);
 
   const kpis = stats ? [
     { label: 'Issues Tracked', value: String(stats.total_complaints), icon: '📋', color: '#3b82f6', change: `${stats.complaints_today} today` },
@@ -686,6 +757,83 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 14 }}>
+                  ✅ Authority Completion Queue
+                  <span style={{ fontSize: '0.75rem', fontWeight: 500, color: '#f59e0b', marginLeft: 8 }}>
+                    ({verificationRequests.length} awaiting leader verification)
+                  </span>
+                </h3>
+
+                {verificationRequests.length === 0 ? (
+                  <div style={{ fontSize: '0.82rem', color: 'var(--text-tertiary)' }}>
+                    No authority-marked completion requests right now.
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gap: 12 }}>
+                    {verificationRequests.slice(0, 8).map((req) => (
+                      <div key={req.ticket_id} style={{ border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 12, background: 'var(--bg-tertiary)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--accent-blue-light)', fontWeight: 700 }}>{req.ticket_id}</div>
+                            <div style={{ fontWeight: 700 }}>{req.title}</div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>{req.ward} • {req.category} • {req.assigned_authority || 'Authority'}</div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <span className={`badge badge-${(req.effective_priority || req.priority || 'p3').toLowerCase()}`}>{req.effective_priority || req.priority}</span>
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                              Verify: <strong>{req.verification_status || 'pending_review'}</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        {(req.before_photo || req.after_photo) && (
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, marginTop: 10 }}>
+                            {req.before_photo && (
+                              <div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginBottom: 4 }}>Before</div>
+                                <img src={buildMediaUrl(req.before_photo)} alt="Before evidence" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--border-subtle)' }} />
+                              </div>
+                            )}
+                            {req.after_photo && (
+                              <div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginBottom: 4 }}>After</div>
+                                <img src={buildMediaUrl(req.after_photo)} alt="After evidence" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--border-subtle)' }} />
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                          AI check result: {typeof req.verification_score === 'number' ? `${req.verification_score}/100` : 'pending'}
+                          {typeof req.verification_confidence === 'number' ? ` • confidence ${req.verification_confidence}%` : ''}
+                        </div>
+                        {(req.verification_engine || req.verification_model) && (
+                          <div style={{ marginTop: 4, fontSize: '0.74rem', color: 'var(--text-tertiary)' }}>
+                            Engine: {req.verification_engine || 'unknown'}{req.verification_model ? ` • ${req.verification_model}` : ''}
+                          </div>
+                        )}
+                        {req.verification_explanation && (
+                          <div style={{ marginTop: 4, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{req.verification_explanation}</div>
+                        )}
+
+                        <div style={{ marginTop: 10 }}>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ padding: '6px 12px', fontSize: '0.74rem' }}
+                            onClick={() => {
+                              openManagePanel(req.ticket_id);
+                            }}
+                          >
+                            Open In Leader Verification Workspace
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Incident Clusters */}
               <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>🧠 Incident Clusters (AI Merged)</h3>
@@ -774,8 +922,13 @@ export default function DashboardPage() {
                               <td style={{ padding: '12px', fontSize: '0.85rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</td>
                               <td style={{ padding: '12px' }}><span className="chip" style={{ fontSize: '0.7rem' }}>{c.category}</span></td>
                               <td style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{c.ward}</td>
-                              <td style={{ padding: '12px' }}><span className={`badge badge-${c.priority?.toLowerCase()}`} style={{ fontSize: '0.65rem' }}>{c.priority}</span></td>
-                              <td style={{ padding: '12px', fontSize: '0.85rem', fontWeight: 700, color: c.ai_score > 80 ? '#ef4444' : c.ai_score > 50 ? '#f59e0b' : '#22c55e' }}>{c.ai_score}</td>
+                              <td style={{ padding: '12px' }}><span className={`badge badge-${(c.effective_priority || c.priority)?.toLowerCase()}`} style={{ fontSize: '0.65rem' }}>{c.effective_priority || c.priority}</span></td>
+                              <td style={{ padding: '12px', fontSize: '0.85rem', fontWeight: 700, color: (c.effective_ai_score || c.ai_score) > 80 ? '#ef4444' : (c.effective_ai_score || c.ai_score) > 50 ? '#f59e0b' : '#22c55e' }}>
+                                {Math.round(c.effective_ai_score || c.ai_score)}
+                                <div style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', fontWeight: 500 }}>
+                                  {c.score_source === 'qwen' ? 'Qwen LLM' : 'Fallback'}
+                                </div>
+                              </td>
                               <td style={{ padding: '12px' }}>
                                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: sConfig?.color || '#64748b' }} />
@@ -822,8 +975,13 @@ export default function DashboardPage() {
                             <td style={{ padding: '12px', fontSize: '0.85rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</td>
                             <td style={{ padding: '12px' }}><span className="chip" style={{ fontSize: '0.7rem' }}>{c.category}</span></td>
                             <td style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{c.ward}</td>
-                            <td style={{ padding: '12px' }}><span className={`badge badge-${c.priority?.toLowerCase()}`} style={{ fontSize: '0.65rem' }}>{c.priority}</span></td>
-                            <td style={{ padding: '12px', fontSize: '0.85rem', fontWeight: 700, color: c.ai_score > 80 ? '#ef4444' : c.ai_score > 50 ? '#f59e0b' : '#22c55e' }}>{c.ai_score}</td>
+                            <td style={{ padding: '12px' }}><span className={`badge badge-${(c.effective_priority || c.priority)?.toLowerCase()}`} style={{ fontSize: '0.65rem' }}>{c.effective_priority || c.priority}</span></td>
+                            <td style={{ padding: '12px', fontSize: '0.85rem', fontWeight: 700, color: (c.effective_ai_score || c.ai_score) > 80 ? '#ef4444' : (c.effective_ai_score || c.ai_score) > 50 ? '#f59e0b' : '#22c55e' }}>
+                              {Math.round(c.effective_ai_score || c.ai_score)}
+                              <div style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', fontWeight: 500 }}>
+                                {c.score_source === 'qwen' ? 'Qwen LLM' : 'Fallback'}
+                              </div>
+                            </td>
                             <td style={{ padding: '12px' }}>
                               <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: sConfig?.color || '#64748b' }} />
@@ -839,14 +997,13 @@ export default function DashboardPage() {
                                 className="btn btn-secondary"
                                 style={{ padding: '6px 10px', fontSize: '0.72rem' }}
                                 onClick={() => {
-                                  setSelectedTicket(c.ticket_id);
+                                  openManagePanel(c.ticket_id);
                                   setAuthorityName(c.assigned_authority || '');
                                   setAuthorityEmail(c.authority_email || '');
                                   setLeaderNote(c.leader_note || '');
                                   setAuthorityResponse(c.authority_response || '');
                                   setMailSubject(`Action Required: ${c.ticket_id} (${c.priority})`);
                                   setMailMessage(`Please take action on ticket ${c.ticket_id} (${c.category}, ${c.ward}).\n\nIssue: ${c.title}`);
-                                  setActionMessage('');
                                 }}
                               >
                                 Manage
@@ -861,13 +1018,47 @@ export default function DashboardPage() {
               )}
 
               {selectedComplaint && (
-                <div style={{ marginTop: 20, padding: 18, borderRadius: 10, border: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
+                <div ref={assignPanelRef} style={{ marginTop: 20, padding: 18, borderRadius: 10, border: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 10 }}>
                     <div>
                       <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>Workflow Control</div>
                       <div style={{ fontWeight: 700, color: 'var(--accent-blue-light)' }}>{selectedComplaint.ticket_id}</div>
                     </div>
-                    <span className={`badge badge-${selectedComplaint.priority?.toLowerCase()}`}>{selectedComplaint.priority}</span>
+                    <span className={`badge badge-${(selectedComplaint.effective_priority || selectedComplaint.priority)?.toLowerCase()}`}>{selectedComplaint.effective_priority || selectedComplaint.priority}</span>
+                  </div>
+
+                  <div style={{ marginBottom: 10, padding: 10, borderRadius: 8, background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
+                    <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--accent-blue-light)', marginBottom: 6 }}>AI PRIORITY BREAKDOWN</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                      <span className="chip" style={{ fontSize: '0.68rem' }}>
+                        Engine: {selectedComplaint.score_source === 'qwen' ? 'Qwen LLM' : 'Heuristic Fallback'}
+                      </span>
+                      {selectedComplaint.ai_model_version && (
+                        <span className="chip" style={{ fontSize: '0.68rem' }}>Model: {selectedComplaint.ai_model_version}</span>
+                      )}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, fontSize: '0.8rem' }}>
+                      <div><strong>Score:</strong> {Math.round(selectedComplaint.effective_ai_score || selectedComplaint.ai_score)}/100</div>
+                      <div><strong>Urgency:</strong> {Math.round(selectedComplaint.urgency_score || 0)}</div>
+                      <div><strong>Impact:</strong> {Math.round(selectedComplaint.impact_score || 0)}</div>
+                      <div><strong>Recurrence:</strong> {Math.round(selectedComplaint.recurrence_score || 0)}</div>
+                      <div><strong>Sentiment:</strong> {Math.round(selectedComplaint.sentiment_score || 0)}</div>
+                    </div>
+                    {(selectedComplaint.ai_breakdown?.recurrence_count || selectedComplaint.ai_breakdown?.local_cluster_count) ? (
+                      <div style={{ marginTop: 6, fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                        Repeat reports: {selectedComplaint.ai_breakdown?.recurrence_count || 0} • Nearby cluster: {selectedComplaint.ai_breakdown?.local_cluster_count || 0}
+                      </div>
+                    ) : null}
+                    {selectedComplaint.ai_explanation && (
+                      <div style={{ marginTop: 6, fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                        {selectedComplaint.ai_explanation}
+                      </div>
+                    )}
+                    {selectedComplaint.ai_breakdown?.qwen_reasoning && (
+                      <div style={{ marginTop: 6, fontSize: '0.76rem', color: '#0f766e' }}>
+                        Qwen reasoning: {selectedComplaint.ai_breakdown.qwen_reasoning}
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginBottom: 10 }}>
@@ -951,6 +1142,12 @@ export default function DashboardPage() {
                     )}
                     {typeof selectedComplaint.verification_confidence === 'number' && (
                       <span> | Confidence: <strong>{selectedComplaint.verification_confidence}</strong></span>
+                    )}
+                    {selectedComplaint.verification_engine && (
+                      <span> | Engine: <strong>{selectedComplaint.verification_engine}</strong></span>
+                    )}
+                    {selectedComplaint.verification_model && (
+                      <span> | Model: <strong>{selectedComplaint.verification_model}</strong></span>
                     )}
                   </div>
 
