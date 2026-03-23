@@ -14,18 +14,7 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-<<<<<<< HEAD
-engine_kwargs = {"pool_pre_ping": True}
-if IS_SQLITE:
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
-else:
-    # PostgreSQL connection pool settings for production
-    engine_kwargs["pool_size"] = 5
-    engine_kwargs["max_overflow"] = 10
-    engine_kwargs["pool_recycle"] = 300
-=======
 FALLBACK_SQLITE_URL = "sqlite:///./janshakti.db"
->>>>>>> d67253a7ef990e8e333bd37e8e2de0f9db913431
 
 
 def _build_engine(url: str):
