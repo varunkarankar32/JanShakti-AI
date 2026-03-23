@@ -1,5 +1,7 @@
+import logging
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.exc import OperationalError
 from config import (
     DATABASE_URL,
     DEFAULT_LEADER_NAME,
@@ -10,11 +12,19 @@ from config import (
     DEFAULT_AUTHORITY_PASSWORD,
 )
 
+logger = logging.getLogger(__name__)
+
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
 
 engine_kwargs = {"pool_pre_ping": True}
 if IS_SQLITE:
     engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    # PostgreSQL-specific: fast connection timeout + pool recycling
+    engine_kwargs["connect_args"] = {"connect_timeout": 10}
+    engine_kwargs["pool_recycle"] = 300
+    engine_kwargs["pool_size"] = 5
+    engine_kwargs["max_overflow"] = 10
 
 engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -135,8 +145,24 @@ def _seed_default_authority():
 
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
-    _ensure_user_role_column()
-    _ensure_complaint_workflow_columns()
-    _seed_default_leader()
-    _seed_default_authority()
+    """Initialize database tables on startup.
+    Catches connection errors so the app can still start even if the DB
+    is temporarily unavailable (e.g. Supabase project paused).
+    """
+    try:
+        Base.metadata.create_all(bind=engine)
+        if IS_SQLITE:
+            _ensure_user_role_column()
+            _ensure_complaint_workflow_columns()
+        _seed_default_leader()
+        _seed_default_authority()
+        logger.info("[DB] Database initialized successfully")
+    except OperationalError as exc:
+        logger.error(
+            "[DB] ⚠️  Could not connect to database — the app will start but "
+            "database-dependent endpoints will fail until connectivity is restored.\n"
+            "    Error: %s",
+            exc,
+        )
+    except Exception as exc:
+        logger.error("[DB] Unexpected error during init: %s", exc)
