@@ -2,7 +2,7 @@
 Complaints Router — CRUD and workflow operations for citizen complaints.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 import json
@@ -310,7 +310,7 @@ def _local_cluster_count(
         .filter(Complaint.ward == ward)
         .filter(Complaint.category == category)
         .filter(Complaint.status != ComplaintStatus.RESOLVED)
-        .filter(Complaint.created_at >= datetime.now() - timedelta(days=30))
+        .filter(Complaint.created_at >= datetime.now(timezone.utc) - timedelta(days=30))
         .filter(Complaint.latitude.isnot(None), Complaint.longitude.isnot(None))
         .all()
     )
@@ -555,7 +555,8 @@ def _unresponded_hours(complaint: Complaint) -> float:
         return 0.0
     if not complaint.created_at:
         return 0.0
-    return max(0.0, (datetime.now() - complaint.created_at).total_seconds() / 3600.0)
+    created = complaint.created_at if complaint.created_at.tzinfo else complaint.created_at.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - created).total_seconds() / 3600.0)
 
 
 def _effective_priority_snapshot(complaint: Complaint):
@@ -669,7 +670,7 @@ def _background_enrich_complaint_media(complaint_id: int):
             .filter(Complaint.ward == complaint.ward)
             .filter(Complaint.category == category)
             .filter(Complaint.status != ComplaintStatus.RESOLVED)
-            .filter(Complaint.created_at >= datetime.now() - timedelta(days=30))
+            .filter(Complaint.created_at >= datetime.now(timezone.utc) - timedelta(days=30))
             .count()
         )
         local_cluster_count = _local_cluster_count(
@@ -819,7 +820,7 @@ def create_complaint(
         .filter(Complaint.ward == complaint.ward)
         .filter(Complaint.category == category)
         .filter(Complaint.status != ComplaintStatus.RESOLVED)
-        .filter(Complaint.created_at >= datetime.now() - timedelta(days=30))
+        .filter(Complaint.created_at >= datetime.now(timezone.utc) - timedelta(days=30))
         .count()
     )
     local_cluster_count = _local_cluster_count(
@@ -1435,7 +1436,7 @@ def update_complaint(ticket_id: str, update: ComplaintUpdate, db: Session = Depe
     if update.status:
         complaint.status = ComplaintStatus(update.status)
         if update.status == "resolved":
-            complaint.resolved_at = datetime.now()
+            complaint.resolved_at = datetime.now(timezone.utc)
     if update.assigned_to:
         complaint.assigned_to = update.assigned_to
         if complaint.status == ComplaintStatus.OPEN:
@@ -1756,7 +1757,7 @@ def leader_resolve_complaint(
         raise HTTPException(status_code=400, detail="Complaint must be in assigned/in-progress/verification stage")
 
     complaint.status = ComplaintStatus.RESOLVED
-    complaint.resolved_at = datetime.now()
+    complaint.resolved_at = datetime.now(timezone.utc)
     complaint.verification_status = "verified"
     complaint.leader_note = req.resolution_note
     if req.citizen_update:
@@ -1999,7 +2000,7 @@ def incident_summary(
 ):
     _apply_starvation_escalation(db)
 
-    since = datetime.now() - timedelta(hours=max(24, min(window_hours, 24 * 30)))
+    since = datetime.now(timezone.utc) - timedelta(hours=max(24, min(window_hours, 24 * 30)))
     complaints = (
         db.query(Complaint)
         .filter(Complaint.created_at >= since)

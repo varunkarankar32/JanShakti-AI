@@ -4,7 +4,7 @@ Builds proactive alerts, rumor fact-check cards, ward drives, and starvation wat
 """
 
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 
@@ -125,7 +125,11 @@ class CivicIntelligenceService:
         created_at = self._value(complaint, "created_at")
         if not created_at:
             return 0.0
-        ref = now or datetime.now()
+        ref = now or datetime.now(timezone.utc)
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        if ref.tzinfo is None:
+            ref = ref.replace(tzinfo=timezone.utc)
         return max(0.0, (ref - created_at).total_seconds() / 3600.0)
 
     def starvation_watch(self, complaints: List[Any]) -> Dict[str, Any]:
