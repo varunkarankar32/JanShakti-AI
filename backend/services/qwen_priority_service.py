@@ -232,8 +232,6 @@ class QwenPriorityService:
             if ok:
                 return True, generated, self.api_model, ""
             provider_error = reason
-            if self.api_provider == "openrouter":
-                return False, "", "", provider_error
 
         self._ensure_loaded()
         if self.generator is None:
