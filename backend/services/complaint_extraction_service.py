@@ -10,6 +10,7 @@ from services.nlp_service import nlp_service
 from services.speech_service import speech_service
 from services.vision_service import vision_service
 from services.qwen_priority_service import qwen_priority_service
+from services.gemini_vision_service import gemini_vision_service
 
 
 VISION_TO_CATEGORY = {
@@ -291,11 +292,20 @@ class ComplaintExtractionService:
         vision_result = vision_service.detect(image_bytes, image_name=image_name)
         detected_category = vision_result.get("category", "Unknown")
         mapped_category = VISION_TO_CATEGORY.get(detected_category, "Others")
+        gemini_result = gemini_vision_service.classify_issue(image_bytes=image_bytes, image_name=image_name)
+
+        if gemini_result.get("used"):
+            gemini_category = str(gemini_result.get("category") or "").strip()
+            if gemini_category and gemini_category != mapped_category:
+                mapped_category = gemini_category
+                vision_result = dict(vision_result)
+                vision_result["category_original"] = detected_category
+                vision_result["category"] = str(gemini_result.get("issue_label") or detected_category)
 
         image_only_mode = not (caption and caption.strip())
         filename_hint_category = self._category_hint_from_image_name(image_name)
 
-        if image_only_mode and filename_hint_category and filename_hint_category != mapped_category:
+        if image_only_mode and filename_hint_category and filename_hint_category != mapped_category and not gemini_result.get("used"):
             mapped_category = filename_hint_category
             # Keep visual confidence/severity but align semantic label with filename hint.
             vision_result = dict(vision_result)
@@ -324,8 +334,10 @@ class ComplaintExtractionService:
         extracted["image_description_source"] = description_source
         extracted["image_description_model"] = description_model
         extracted["filename_hint_category"] = filename_hint_category
+        extracted["gemini_image_refinement"] = gemini_result
         extracted["ai"]["image_description_source"] = description_source
         extracted["ai"]["image_description_model"] = description_model
+        extracted["ai"]["gemini_image_refinement"] = gemini_result
         return extracted
 
     def extract_from_voice(
