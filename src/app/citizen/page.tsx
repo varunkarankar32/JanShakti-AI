@@ -107,6 +107,7 @@ type BrowserSpeechRecognition = {
   continuous: boolean;
   start: () => void;
   stop: () => void;
+  abort: () => void;
   onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
   onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
@@ -536,7 +537,7 @@ export default function CitizenPortal() {
     }
   };
 
-  const startLiveDictation = () => {
+  const startLiveDictation = async () => {
     if (typeof window === 'undefined') return;
     const w = window as Window & {
       webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
@@ -544,42 +545,88 @@ export default function CitizenPortal() {
     };
     const SpeechRecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) {
-      setVoiceTranscribeError('Live dictation is not supported in this browser.');
+      setVoiceTranscribeError('Live dictation is not supported in this browser. Use Chrome or Edge.');
       return;
     }
 
     setVoiceTranscribeError('');
-    const recognition = new SpeechRecognitionCtor();
-    recognition.lang = 'en-IN';
-    recognition.interimResults = true;
-    recognition.continuous = true;
 
-    recognition.onresult = (event) => {
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i += 1) {
-        transcript += `${event.results[i][0].transcript} `;
-      }
-      const normalized = transcript.trim();
-      setVoiceTranscript(normalized);
-      setVoiceLanguage('Live Mic');
+    // Explicitly request microphone permission first — this is required on
+    // deployed HTTPS sites where the browser may not implicitly grant access.
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Release the stream immediately — we only need the permission grant.
+      stream.getTracks().forEach(t => t.stop());
+    } catch (micErr: unknown) {
+      const msg = micErr instanceof Error ? micErr.message : String(micErr);
+      setVoiceTranscribeError(
+        `Microphone access denied. Please allow microphone permission in your browser settings and try again. (${msg})`
+      );
+      return;
+    }
+
+    const maxRetries = 3;
+    let attempt = 0;
+
+    const tryStart = () => {
+      attempt += 1;
+      const recognition = new SpeechRecognitionCtor();
+      recognition.lang = 'en-IN';
+      recognition.interimResults = true;
+      recognition.continuous = true;
+
+      recognition.onresult = (event) => {
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i += 1) {
+          transcript += `${event.results[i][0].transcript} `;
+        }
+        const normalized = transcript.trim();
+        setVoiceTranscript(normalized);
+        setVoiceLanguage('Live Mic');
+      };
+
+      recognition.onerror = (event) => {
+        const err = event?.error || 'unknown';
+
+        // The 'network' error is often transient — retry automatically
+        if (err === 'network' && attempt < maxRetries) {
+          console.warn(`[SpeechRecognition] network error on attempt ${attempt}/${maxRetries}, retrying...`);
+          recognition.abort();
+          setTimeout(tryStart, 500);
+          return;
+        }
+
+        if (err === 'network') {
+          setVoiceTranscribeError(
+            'Live mic could not connect to speech servers. This can happen on some networks/browsers. ' +
+            'Try: 1) Refresh the page 2) Use Chrome or Edge 3) Check that your network allows Google Speech services. ' +
+            'Alternatively, use the "Upload Audio" option to transcribe a recorded file.'
+          );
+        } else if (err === 'not-allowed') {
+          setVoiceTranscribeError(
+            'Microphone access was denied. Please allow microphone permission in your browser settings (click the lock icon in the address bar).'
+          );
+        } else {
+          setVoiceTranscribeError(`Live transcription error: ${err}`);
+        }
+        setVoiceListening(false);
+        recognitionRef.current = null;
+      };
+
+      recognition.onend = () => {
+        setVoiceListening(false);
+        if (!description.trim() && voiceTranscript.trim()) {
+          setDescription(voiceTranscript.trim());
+        }
+        recognitionRef.current = null;
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setVoiceListening(true);
     };
 
-    recognition.onerror = (event) => {
-      const err = event?.error || 'unknown';
-      setVoiceTranscribeError(`Live transcription error: ${err}`);
-    };
-
-    recognition.onend = () => {
-      setVoiceListening(false);
-      if (!description.trim() && voiceTranscript.trim()) {
-        setDescription(voiceTranscript.trim());
-      }
-      recognitionRef.current = null;
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-    setVoiceListening(true);
+    tryStart();
   };
 
   const stopLiveDictation = () => {

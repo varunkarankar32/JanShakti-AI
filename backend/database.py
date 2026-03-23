@@ -176,8 +176,51 @@ def init_db():
         if IS_SQLITE:
             _ensure_user_role_column()
             _ensure_complaint_workflow_columns()
+        else:
+            _ensure_pg_complaint_columns()
         _seed_default_leader()
         _seed_default_authority()
         print(f"[DB] ✅ Database initialized successfully (using {'SQLite' if IS_SQLITE else 'PostgreSQL'})")
     except Exception as exc:
         print(f"[DB] Warning — seeding/migration issue (non-fatal): {exc}")
+
+
+def _ensure_pg_complaint_columns():
+    """Add any missing columns to the complaints table in PostgreSQL."""
+    required_columns = {
+        "ai_risk_score": "FLOAT",
+        "ai_risk_level": "VARCHAR",
+        "ai_risk_factors": "TEXT",
+        "ai_risk_reasoning": "TEXT",
+        "ai_leader_brief": "TEXT",
+        "citizen_language": "VARCHAR",
+        "image_path": "VARCHAR",
+        "audio_path": "VARCHAR",
+        "assigned_authority": "VARCHAR",
+        "authority_email": "VARCHAR",
+        "leader_note": "TEXT",
+        "authority_response": "TEXT",
+        "citizen_update": "TEXT",
+        "ai_breakdown": "TEXT",
+        "ai_explanation": "TEXT",
+        "ai_model_version": "VARCHAR",
+        "before_meta": "TEXT",
+        "after_meta": "TEXT",
+        "verification_score": "FLOAT",
+        "verification_confidence": "FLOAT",
+    }
+
+    with engine.connect() as conn:
+        result = conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'complaints'"
+        ))
+        existing = {row[0] for row in result.fetchall()}
+
+        for name, col_type in required_columns.items():
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE complaints ADD COLUMN {name} {col_type}"))
+                print(f"[DB] Added missing column: complaints.{name}")
+
+        conn.commit()
+
