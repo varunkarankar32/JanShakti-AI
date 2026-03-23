@@ -709,13 +709,78 @@ def _background_enrich_complaint_media(complaint_id: int):
         complaint.ai_explanation = priority_result.get("explanation")
         complaint.ai_model_version = priority_result.get("model_version")
 
+        # ── Gemini 2.5 Flash: AI priority scoring + risk assessment + leader brief ──
+        try:
+            import asyncio
+
+            # 1. Gemini priority scoring (enriches Qwen score)
+            gemini_score = asyncio.run(
+                gemini_ai_service.score_priority(
+                    text=scoring_text,
+                    category=category,
+                    ward=complaint.ward,
+                )
+            )
+            if gemini_score.get("used"):
+                g_urgency = gemini_score["urgency"]
+                g_impact = gemini_score["impact"]
+                g_sentiment = gemini_score["sentiment_score"]
+                g_ai_score = round(g_urgency * 0.4 + g_impact * 0.35 + g_sentiment * 0.15 + (complaint.recurrence_score or 0) * 0.1, 1)
+                # Use Gemini score if higher (more accurate AI > heuristic)
+                if g_ai_score > (complaint.ai_score or 0):
+                    complaint.ai_score = g_ai_score
+                    complaint.urgency_score = g_urgency
+                    complaint.impact_score = g_impact
+                    complaint.sentiment_score = g_sentiment
+                    # Re-determine priority level from Gemini score
+                    if g_ai_score >= 80:
+                        complaint.priority = PriorityLevel.P0
+                    elif g_ai_score >= 60:
+                        complaint.priority = PriorityLevel.P1
+                    elif g_ai_score >= 35:
+                        complaint.priority = PriorityLevel.P2
+                    else:
+                        complaint.priority = PriorityLevel.P3
+                    complaint.ai_model_version = f"Gemini-2.5-Flash + {complaint.ai_model_version or 'Qwen'}"
+                    complaint.ai_explanation = gemini_score.get("reasoning") or complaint.ai_explanation
+
+            # 2. Gemini risk assessment
+            risk_result = asyncio.run(
+                gemini_ai_service.assess_risk(
+                    description=scoring_text,
+                    category=category,
+                    ward=complaint.ward,
+                    title=complaint.title,
+                )
+            )
+            if risk_result.get("success"):
+                complaint.ai_risk_score = risk_result.get("risk_score")
+                complaint.ai_risk_level = risk_result.get("risk_level")
+                complaint.ai_risk_factors = json.dumps(risk_result.get("risk_factors", []))
+                complaint.ai_risk_reasoning = risk_result.get("reasoning")
+
+            # 3. Gemini leader brief
+            leader_brief = asyncio.run(
+                gemini_ai_service.generate_leader_brief(
+                    description=scoring_text,
+                    category=category,
+                    ward=complaint.ward,
+                    title=complaint.title,
+                )
+            )
+            if leader_brief.get("success"):
+                complaint.ai_leader_brief = json.dumps(leader_brief)
+
+        except Exception:
+            pass  # Gemini enrichment is best-effort; Qwen result already saved above
+
         _log_activity(
             db,
             complaint,
             actor_role="system",
             actor_name="AI Engine",
             action="background_ai_enrichment_completed",
-            note=f"score={complaint.ai_score}; priority={complaint.priority.value if complaint.priority else 'P3'}",
+            note=f"score={complaint.ai_score}; priority={complaint.priority.value if complaint.priority else 'P3'}; risk={complaint.ai_risk_level or 'N/A'}",
         )
         db.commit()
     except Exception:
@@ -1179,6 +1244,12 @@ def list_complaints(
                 "created_at": c.created_at.isoformat() if c.created_at else None,
                 "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
                 "rating": c.rating,
+                # Gemini AI Analysis (for leader dashboard)
+                "ai_risk_score": c.ai_risk_score,
+                "ai_risk_level": c.ai_risk_level,
+                "ai_risk_factors": json.loads(c.ai_risk_factors) if c.ai_risk_factors else None,
+                "ai_risk_reasoning": c.ai_risk_reasoning,
+                "ai_leader_brief": json.loads(c.ai_leader_brief) if c.ai_leader_brief else None,
             })(_effective_priority_snapshot(c))
             for c in complaints
         ],
@@ -1422,6 +1493,12 @@ def get_complaint(ticket_id: str, db: Session = Depends(get_db)):
         "resolved_at": complaint.resolved_at.isoformat() if complaint.resolved_at else None,
         "rating": complaint.rating,
         "feedback": complaint.feedback,
+        # Gemini AI Analysis (for leader dashboard)
+        "ai_risk_score": complaint.ai_risk_score,
+        "ai_risk_level": complaint.ai_risk_level,
+        "ai_risk_factors": json.loads(complaint.ai_risk_factors) if complaint.ai_risk_factors else None,
+        "ai_risk_reasoning": complaint.ai_risk_reasoning,
+        "ai_leader_brief": json.loads(complaint.ai_leader_brief) if complaint.ai_leader_brief else None,
         "activity": _activity_payload(db, complaint.id),
     }
 
