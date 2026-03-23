@@ -57,6 +57,12 @@ class Complaint(Base):
     ai_explanation = Column(Text, nullable=True)  # Human-readable AI scoring rationale
     ai_model_version = Column(String, nullable=True)
 
+    # AI Risk Assessment (Gemini-powered, investor-visible)
+    ai_risk_score = Column(Float, nullable=True)       # 0-100 risk score from Gemini
+    ai_risk_level = Column(String, nullable=True)       # Critical/High/Medium/Low
+    ai_risk_factors = Column(Text, nullable=True)       # JSON array of risk factors
+    ai_risk_reasoning = Column(Text, nullable=True)     # AI reasoning text
+
     # Status
     status = Column(SqlEnum(ComplaintStatus), default=ComplaintStatus.OPEN)
     input_mode = Column(SqlEnum(InputMode), default=InputMode.TEXT)

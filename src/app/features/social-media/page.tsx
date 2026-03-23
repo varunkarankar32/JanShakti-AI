@@ -82,6 +82,10 @@ export default function SocialMediaPage() {
   const [factResult, setFactResult] = useState<FactCheck | null>(null);
   const [factLoading, setFactLoading] = useState(false);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [govIntel, setGovIntel] = useState<any>(null);
+  const [govLoading, setGovLoading] = useState(false);
+
   const runManualFactCheck = async () => {
     if (!factInput.trim()) return;
     setFactLoading(true);
@@ -152,6 +156,26 @@ export default function SocialMediaPage() {
     };
 
     load();
+
+    // Auto-run governance intelligence
+    const loadGov = async () => {
+      setGovLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/api/dashboard/governance-intelligence`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ region: 'Municipal Region' }),
+        });
+        if (res.ok) {
+          setGovIntel(await res.json());
+        }
+      } catch {
+        setGovIntel(null);
+      } finally {
+        setGovLoading(false);
+      }
+    };
+    loadGov();
   }, []);
 
   return (
@@ -342,6 +366,140 @@ export default function SocialMediaPage() {
                 </>
               )}
             </div>
+          </div>
+
+          {/* === AI GOVERNANCE INTELLIGENCE === */}
+          <div className="glass-card" style={{ padding: 24, marginTop: 24, border: '1px solid rgba(139,92,246,0.3)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0 }}>🧠 AI Governance Intelligence</h3>
+              <span style={{ fontSize: '0.68rem', background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>Gemini 2.5 Flash</span>
+            </div>
+
+            {govLoading && (
+              <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-secondary)' }}>
+                <div style={{ fontSize: '1.5rem', marginBottom: 8, animation: 'pulse 2s infinite' }}>🧠</div>
+                Analyzing social signals with Gemini AI...
+              </div>
+            )}
+
+            {govIntel && govIntel.success && (
+              <div>
+                {/* Leader Summary */}
+                <div style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 600, color: '#8b5cf6', marginBottom: 4 }}>📊 Leader Summary</div>
+                  <div style={{ fontSize: '0.85rem', lineHeight: 1.55 }}>{govIntel.leader_summary}</div>
+                </div>
+
+                {/* Overall Sentiment */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 16 }}>
+                  <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 10 }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>Overall Sentiment</div>
+                    <div style={{ fontWeight: 700, fontSize: '1rem', color: govIntel.overall_sentiment === 'Negative' ? '#dc2626' : govIntel.overall_sentiment === 'Positive' ? '#22c55e' : '#f59e0b' }}>
+                      {govIntel.overall_sentiment} ({govIntel.overall_sentiment_score}/100)
+                    </div>
+                  </div>
+                  {(govIntel.trending_topics || []).length > 0 && (
+                    <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 10 }}>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginBottom: 4 }}>Trending Topics</div>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {govIntel.trending_topics.map((t: string, i: number) => (
+                          <span key={i} style={{ fontSize: '0.68rem', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', padding: '2px 6px', borderRadius: 8 }}>#{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Top 3 Urgent */}
+                {govIntel.top_3_urgent && govIntel.top_3_urgent.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: 8 }}>🚨 Top 3 Urgent Issues</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 8 }}>
+                      {govIntel.top_3_urgent.map((u: { issue: string; priority_score: number; why: string }, i: number) => (
+                        <div key={i} style={{ border: '2px solid rgba(239,68,68,0.3)', borderRadius: 10, padding: 12, background: 'rgba(239,68,68,0.04)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ fontWeight: 700, fontSize: '0.82rem' }}>{u.issue}</span>
+                            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#dc2626' }}>{u.priority_score}/100</span>
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{u.why}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Detected Issues */}
+                {govIntel.detected_issues && govIntel.detected_issues.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: 8 }}>📋 Detected Issues ({govIntel.detected_issues.length})</div>
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {govIntel.detected_issues.map((issue: { issue_name: string; category: string; mention_count: number; sentiment: string; sentiment_score: number; urgency: string; priority_score: number; is_viral: boolean; inferred_location: string; misinformation_status: string; immediate_action: string; short_term_action: string; long_term_solution: string; public_response: string }, i: number) => (
+                        <div key={i} style={{ border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 14 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                            <div>
+                              <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>{issue.issue_name}</span>
+                              {issue.is_viral && <span style={{ marginLeft: 6, fontSize: '0.62rem', background: '#dc2626', color: '#fff', padding: '1px 5px', borderRadius: 8 }}>🔥 VIRAL</span>}
+                            </div>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <span style={{ fontSize: '0.62rem', padding: '2px 6px', borderRadius: 6, background: issue.urgency === 'Critical' ? '#dc2626' : issue.urgency === 'High' ? '#f59e0b' : '#22c55e', color: '#fff' }}>{issue.urgency}</span>
+                              <span style={{ fontSize: '0.62rem', padding: '2px 6px', borderRadius: 6, background: issue.sentiment === 'Negative' ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)', color: issue.sentiment === 'Negative' ? '#dc2626' : '#22c55e' }}>{issue.sentiment}</span>
+                            </div>
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: 6 }}>
+                            {issue.category} • {issue.mention_count} mentions • {issue.inferred_location} • Priority: {issue.priority_score}/100
+                          </div>
+                          <div style={{ fontSize: '0.68rem', marginBottom: 4 }}>
+                            <span style={{ fontWeight: 600 }}>🚀 Immediate:</span> {issue.immediate_action}
+                          </div>
+                          <div style={{ fontSize: '0.68rem', marginBottom: 4 }}>
+                            <span style={{ fontWeight: 600 }}>📅 Short-term:</span> {issue.short_term_action}
+                          </div>
+                          <div style={{ fontSize: '0.68rem', marginBottom: 6 }}>
+                            <span style={{ fontWeight: 600 }}>🏗️ Long-term:</span> {issue.long_term_solution}
+                          </div>
+                          {issue.public_response && (
+                            <div style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: 8, padding: 8, fontSize: '0.72rem' }}>
+                              <div style={{ fontWeight: 600, marginBottom: 2 }}>🐦 AI Public Response:</div>
+                              {issue.public_response}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Misinformation Flags */}
+                {govIntel.misinformation_flags && govIntel.misinformation_flags.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: 8 }}>⚠️ Misinformation Check</div>
+                    {govIntel.misinformation_flags.map((m: { claim: string; status: string; fact: string; source: string }, i: number) => (
+                      <div key={i} style={{ border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, padding: 10, marginBottom: 6, background: 'rgba(245,158,11,0.04)' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 600 }}>{m.claim}</div>
+                        <div style={{ fontSize: '0.68rem', color: m.status === 'Likely Misinformation' ? '#dc2626' : '#f59e0b', fontWeight: 600 }}>{m.status}</div>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>Fact: {m.fact}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Recommended Next Steps */}
+                {govIntel.recommended_next_steps && govIntel.recommended_next_steps.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: 6 }}>✅ Recommended Next Steps</div>
+                    {govIntel.recommended_next_steps.map((s: string, i: number) => (
+                      <div key={i} style={{ fontSize: '0.74rem', paddingLeft: 12, marginBottom: 3 }}>• {s}</div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ marginTop: 10, fontSize: '0.62rem', color: 'var(--text-tertiary)', textAlign: 'right' }}>AI Model: {govIntel.ai_model}</div>
+              </div>
+            )}
+
+            {govIntel && !govIntel.success && (
+              <div style={{ color: '#dc2626', fontSize: '0.82rem' }}>❌ {govIntel.error || 'Analysis failed'}</div>
+            )}
           </div>
         </div>
       </section>

@@ -34,6 +34,7 @@ from routers.auth import (
 from services.priority_engine import priority_engine
 from services.complaint_extraction_service import complaint_extraction_service
 from services.whatsapp_service import whatsapp_bot
+from services.gemini_ai_service import gemini_ai_service
 from config import SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_EMAIL, SMTP_USE_TLS, UPLOAD_DIR
 
 router = APIRouter(prefix="/complaints", tags=["Complaints"])
@@ -1007,6 +1008,105 @@ async def extract_complaint_voice(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+
+class SmartFillRequest(BaseModel):
+    text: str
+
+
+class RiskAssessmentRequest(BaseModel):
+    description: str
+    category: str
+    ward: str
+    title: Optional[str] = None
+
+
+@router.post("/ai/analyze-image")
+async def ai_analyze_image(
+    image: UploadFile = File(...),
+    ward: Optional[str] = Form(None),
+):
+    """
+    🧠 Gemini 2.5 Flash — Analyze civic issue image.
+    Returns: description, category, severity, risk_score, risk_level, risk_factors.
+    Auto-fills the complaint form from the uploaded photo.
+    """
+    image_bytes = await image.read()
+    if len(image_bytes) < 100:
+        raise HTTPException(status_code=400, detail="Image file is too small or empty")
+
+    media_path = _save_citizen_media(image_bytes, image.filename or "image.jpg", "image")
+    result = await gemini_ai_service.analyze_image(image_bytes, image_name=image.filename)
+    result["source_media_path"] = media_path
+    return result
+
+
+@router.post("/ai/risk-assessment")
+async def ai_risk_assessment(request: RiskAssessmentRequest):
+    """
+    🧠 Gemini 2.5 Flash — Generate investor-grade AI risk assessment.
+    Returns: risk_score, risk_level, risk_factors, reasoning, urgency_hours, etc.
+    """
+    if not request.description or len(request.description.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Description too short for risk assessment")
+
+    result = await gemini_ai_service.assess_risk(
+        description=request.description,
+        category=request.category,
+        ward=request.ward,
+        title=request.title,
+    )
+    return result
+
+
+@router.post("/ai/smart-fill")
+async def ai_smart_fill(request: SmartFillRequest):
+    """
+    🧠 Gemini 2.5 Flash — Enhance raw citizen text into a polished complaint.
+    Returns: enhanced_description, auto-detected category & severity.
+    """
+    if not request.text or len(request.text.strip()) < 5:
+        raise HTTPException(status_code=400, detail="Text too short")
+
+    result = await gemini_ai_service.smart_fill(request.text)
+    return result
+
+
+class GenerateCommunicationRequest(BaseModel):
+    comm_type: str  # press_release | social_post | citizen_advisory | awareness_campaign
+    ward: str = "All Wards"
+    category: str = "General"
+    context: str = ""
+    total_complaints: int = 0
+    resolved: int = 0
+    pending: int = 0
+    p0_active: int = 0
+
+
+@router.post("/ai/generate-communication")
+async def ai_generate_communication(request: GenerateCommunicationRequest):
+    """
+    🧠 Gemini 2.5 Flash — AI Public Communication Generator.
+    Generates press releases, social media posts, citizen advisories, and awareness campaigns.
+    """
+    valid_types = {"press_release", "social_post", "citizen_advisory", "awareness_campaign"}
+    if request.comm_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"comm_type must be one of: {valid_types}")
+
+    stats = {
+        "total_complaints": request.total_complaints,
+        "resolved": request.resolved,
+        "pending": request.pending,
+        "p0_active": request.p0_active,
+    }
+
+    result = await gemini_ai_service.generate_public_communication(
+        comm_type=request.comm_type,
+        ward=request.ward,
+        category=request.category,
+        summary_stats=stats,
+        context_text=request.context,
+    )
+    return result
 
 @router.get("")
 def list_complaints(
