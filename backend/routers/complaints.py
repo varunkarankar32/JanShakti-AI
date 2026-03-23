@@ -16,12 +16,12 @@ from urllib.parse import quote
 import cv2
 import numpy as np
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import desc, func, or_
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import SessionLocal, get_db
 from models.complaint import Complaint, ComplaintActivity, ComplaintStatus, PriorityLevel, InputMode
 from models.schemas import ComplaintCreate, ComplaintUpdate, ComplaintResponse
 from models.user import User
@@ -584,9 +584,148 @@ def _apply_starvation_escalation(db: Session):
         db.commit()
 
 
+def _background_enrich_complaint_media(complaint_id: int):
+    """Run heavier image/audio understanding + Qwen scoring after complaint is registered."""
+    db = SessionLocal()
+    try:
+        complaint = db.query(Complaint).filter(Complaint.id == complaint_id).first()
+        if not complaint:
+            return
+
+        try:
+            extracted = complaint_extraction_service.extract_from_text(
+                text=complaint.description,
+                ward_hint=complaint.ward,
+                category_hint=complaint.category,
+                source=complaint.input_mode.value if complaint.input_mode else "text",
+            )
+            refined_description = extracted.get("description") or complaint.description
+            ai_meta = extracted.get("ai", {})
+        except Exception:
+            refined_description = complaint.description
+            ai_meta = {}
+
+        category = complaint.category
+        media_context_notes = []
+
+        image_bytes, image_name = _read_media_from_path(complaint.image_path)
+        if image_bytes:
+            try:
+                image_extracted = complaint_extraction_service.extract_from_image(
+                    image_bytes=image_bytes,
+                    caption=refined_description,
+                    ward_hint=complaint.ward,
+                    image_name=image_name,
+                )
+                visual_statement = str(
+                    image_extracted.get("image_problem_description") or image_extracted.get("description") or ""
+                ).strip()
+                if visual_statement:
+                    media_context_notes.append(f"Image analysis: {visual_statement[:240]}")
+
+                detection = image_extracted.get("ai_detection_result")
+                if detection:
+                    det_category = str(detection.get("category", "Unknown"))
+                    det_severity = str(detection.get("severity", "unknown"))
+                    det_conf = detection.get("confidence")
+                    conf_text = f" ({round(float(det_conf) * 100, 1)}% conf)" if det_conf is not None else ""
+                    media_context_notes.append(
+                        f"Image detected {det_category} with {det_severity} severity{conf_text}."
+                    )
+                    ai_meta["image_detection"] = detection
+
+                if image_extracted.get("category"):
+                    category = str(image_extracted.get("category"))
+            except Exception as exc:
+                media_context_notes.append(f"Image analysis unavailable: {str(exc)[:120]}")
+
+        audio_bytes, audio_name = _read_media_from_path(complaint.audio_path)
+        if audio_bytes:
+            try:
+                ext = Path(audio_name or "voice.wav").suffix.lower().lstrip(".") or "wav"
+                voice_extracted = complaint_extraction_service.extract_from_voice(
+                    audio_bytes=audio_bytes,
+                    file_extension=ext,
+                    ward_hint=complaint.ward,
+                )
+                transcript = str(voice_extracted.get("transcript") or "").strip()
+                if transcript:
+                    media_context_notes.append(f"Audio transcript: {transcript[:280]}")
+                speech_meta = voice_extracted.get("speech")
+                if speech_meta:
+                    ai_meta["speech"] = speech_meta
+            except Exception as exc:
+                media_context_notes.append(f"Audio transcription unavailable: {str(exc)[:120]}")
+
+        scoring_text = refined_description
+        if media_context_notes:
+            media_block = "\n".join(f"- {note}" for note in media_context_notes)
+            scoring_text = f"{refined_description}\n\nAI Media Context:\n{media_block}"
+            ai_meta["media_context_notes"] = media_context_notes
+
+        recurrence_count = (
+            db.query(Complaint)
+            .filter(Complaint.ward == complaint.ward)
+            .filter(Complaint.category == category)
+            .filter(Complaint.status != ComplaintStatus.RESOLVED)
+            .filter(Complaint.created_at >= datetime.now() - timedelta(days=30))
+            .count()
+        )
+        local_cluster_count = _local_cluster_count(
+            db=db,
+            ward=complaint.ward,
+            category=category,
+            latitude=complaint.latitude,
+            longitude=complaint.longitude,
+        )
+
+        priority_result = priority_engine.calculate_score(
+            text=scoring_text,
+            category=category,
+            ward=complaint.ward,
+            recurrence_count=recurrence_count,
+            local_cluster_count=local_cluster_count,
+            social_mentions=0,
+            enable_qwen=True,
+        )
+
+        complaint.category = category
+        complaint.description = (
+            f"{refined_description}\n\nAI Media Summary: {media_context_notes[0]}"
+            if media_context_notes
+            else refined_description
+        )
+        complaint.priority = PriorityLevel(priority_result["priority"])
+        complaint.ai_score = priority_result["score"]
+        complaint.urgency_score = priority_result["urgency"]
+        complaint.impact_score = priority_result["impact"]
+        complaint.recurrence_score = priority_result["recurrence"]
+        complaint.sentiment_score = priority_result["sentiment"]
+        complaint.ai_category = ai_meta.get("category")
+        complaint.ai_entities = json.dumps(ai_meta)
+        complaint.ai_breakdown = json.dumps(priority_result.get("breakdown", {}))
+        complaint.ai_explanation = priority_result.get("explanation")
+        complaint.ai_model_version = priority_result.get("model_version")
+
+        _log_activity(
+            db,
+            complaint,
+            actor_role="system",
+            actor_name="AI Engine",
+            action="background_ai_enrichment_completed",
+            note=f"score={complaint.ai_score}; priority={complaint.priority.value if complaint.priority else 'P3'}",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
 @router.post("", response_model=ComplaintResponse)
 def create_complaint(
     complaint: ComplaintCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -606,13 +745,16 @@ def create_complaint(
     refined_description = extracted["description"]
     category = complaint.category if complaint.category else extracted["category"]
     ai_meta = extracted.get("ai", {})
+    defer_media_ai = bool(complaint.image_path or complaint.audio_path)
 
     media_context_notes = []
 
     # Re-read citizen media from server storage so image/audio understanding is always
     # available for scoring, even if frontend submitted only a short placeholder text.
-    image_bytes, image_name = _read_media_from_path(complaint.image_path)
-    if image_bytes:
+    image_bytes, image_name = (None, None)
+    if not defer_media_ai:
+        image_bytes, image_name = _read_media_from_path(complaint.image_path)
+    if image_bytes and not defer_media_ai:
         try:
             image_extracted = complaint_extraction_service.extract_from_image(
                 image_bytes=image_bytes,
@@ -642,8 +784,10 @@ def create_complaint(
         except Exception as exc:
             media_context_notes.append(f"Image analysis unavailable: {str(exc)[:120]}")
 
-    audio_bytes, audio_name = _read_media_from_path(complaint.audio_path)
-    if audio_bytes:
+    audio_bytes, audio_name = (None, None)
+    if not defer_media_ai:
+        audio_bytes, audio_name = _read_media_from_path(complaint.audio_path)
+    if audio_bytes and not defer_media_ai:
         try:
             ext = Path(audio_name or "voice.wav").suffix.lower().lstrip(".") or "wav"
             voice_extracted = complaint_extraction_service.extract_from_voice(
@@ -692,7 +836,12 @@ def create_complaint(
         recurrence_count=recurrence_count,
         local_cluster_count=local_cluster_count,
         social_mentions=0,
+        enable_qwen=not defer_media_ai,
     )
+
+    if defer_media_ai:
+        ai_meta["background_ai_processing"] = "queued"
+        ai_meta["background_ai_processing_note"] = "Media understanding and Qwen re-scoring in progress"
 
     priority_level = PriorityLevel(priority_result["priority"])
     input_mode = InputMode(complaint.input_mode) if complaint.input_mode in [e.value for e in InputMode] else InputMode.TEXT
@@ -744,6 +893,19 @@ def create_complaint(
     )
     db.commit()
     db.refresh(db_complaint)
+
+    if defer_media_ai:
+        _log_activity(
+            db,
+            db_complaint,
+            actor_role="system",
+            actor_name="AI Engine",
+            action="background_ai_enrichment_queued",
+            note="Complaint registered instantly; media/Qwen enrichment queued.",
+        )
+        db.commit()
+        background_tasks.add_task(_background_enrich_complaint_media, db_complaint.id)
+
     return {
         "id": db_complaint.id,
         "ticket_id": db_complaint.ticket_id,

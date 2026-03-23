@@ -62,17 +62,20 @@ class PriorityEngine:
         local_cluster_count: int = 0,
         social_mentions: int = 0,
         unresponded_hours: float = 0.0,
+        enable_qwen: bool = True,
     ) -> Dict:
         """
         Calculate AI priority score using the weighted formula.
         Returns detailed scoring breakdown.
         """
 
-        qwen_result = qwen_priority_service.score_issue(
-            text=text,
-            category=category,
-            ward=ward,
-        )
+        qwen_result = {"used": False, "reason": "disabled_by_workflow"}
+        if enable_qwen:
+            qwen_result = qwen_priority_service.score_issue(
+                text=text,
+                category=category,
+                ward=ward,
+            )
 
         # 1. Urgency Score (40% weight)
         if qwen_result.get("used"):

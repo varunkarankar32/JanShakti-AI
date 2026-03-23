@@ -120,6 +120,34 @@ class ComplaintExtractionService:
         pattern = r"\b\d{2,6}\s+[A-Za-z0-9.\- ]+\s(?:st|street|rd|road|ave|avenue|blvd|boulevard|ln|lane|dr|drive)\b"
         return bool(re.search(pattern, text, flags=re.IGNORECASE))
 
+    def _sanitize_qwen_image_text(self, text: str) -> str:
+        """Remove common hallucinated address/location snippets from Qwen output."""
+        cleaned = self._normalize_text(text)
+        if not cleaned:
+            return ""
+
+        # Drop phrases like "at 4500 W Main St" that frequently appear in hallucinated output.
+        cleaned = re.sub(
+            r"\bat\s+\d{2,6}\s+[A-Za-z0-9.\- ]+\s(?:st|street|rd|road|ave|avenue|blvd|boulevard|ln|lane|dr|drive)\b",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+        # Drop standalone address-like segments if still present.
+        cleaned = re.sub(
+            r"\b\d{2,6}\s+[A-Za-z0-9.\- ]+\s(?:st|street|rd|road|ave|avenue|blvd|boulevard|ln|lane|dr|drive)\b",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+        # Clean punctuation left behind after removals.
+        cleaned = re.sub(r"\s+,", ",", cleaned)
+        cleaned = re.sub(r",\s*,+", ", ", cleaned)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,")
+        return cleaned
+
     def _category_keywords(self, mapped_category: str, detected_category: str) -> list[str]:
         base_map = {
             "Roads & Potholes": ["road", "pothole", "crack", "damage", "surface"],
@@ -184,6 +212,9 @@ class ComplaintExtractionService:
             urgency_note = str(qwen_generated.get("urgency_note", "")).strip()
             if urgency_note:
                 complaint_text = self.refine_complaint_statement(f"{complaint_text} {urgency_note}")
+
+            complaint_text = self.refine_complaint_statement(self._sanitize_qwen_image_text(complaint_text))
+
             if self._looks_like_fabricated_address(complaint_text):
                 qwen_generated = {"used": False, "reason": "qwen_output_filtered_address"}
             elif not self._is_relevant_qwen_image_text(
