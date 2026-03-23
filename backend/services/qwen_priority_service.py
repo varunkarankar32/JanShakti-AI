@@ -8,12 +8,21 @@ from __future__ import annotations
 import json
 import re
 import ast
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
+
+import httpx
 
 from config import (
     QWEN_PRIORITY_ENABLED,
     QWEN_PRIORITY_MAX_NEW_TOKENS,
     QWEN_PRIORITY_MODEL,
+    QWEN_API_PROVIDER,
+    QWEN_API_URL,
+    QWEN_API_KEY,
+    QWEN_API_MODEL,
+    QWEN_API_TIMEOUT,
+    QWEN_API_REFERER,
+    QWEN_API_TITLE,
 )
 
 try:
@@ -121,8 +130,74 @@ class QwenPriorityService:
         self.enabled = QWEN_PRIORITY_ENABLED
         self.model_name = QWEN_PRIORITY_MODEL
         self.max_new_tokens = max(96, QWEN_PRIORITY_MAX_NEW_TOKENS)
+        self.api_provider = str(QWEN_API_PROVIDER or "auto").strip().lower()
+        self.api_url = str(QWEN_API_URL or "").strip()
+        self.api_key = str(QWEN_API_KEY or "").strip()
+        self.api_model = str(QWEN_API_MODEL or "").strip() or self.model_name
+        self.api_timeout = max(10, int(QWEN_API_TIMEOUT or 45))
+        self.api_referer = str(QWEN_API_REFERER or "").strip()
+        self.api_title = str(QWEN_API_TITLE or "JanShakti-AI").strip()
         self.generator = None
         self._load_error = ""
+
+    def _prefer_api(self) -> bool:
+        if self.api_provider == "openrouter":
+            return True
+        if self.api_provider == "local":
+            return False
+        return bool(self.api_key)
+
+    def _generate_with_openrouter(self, prompt: str, max_new_tokens: int) -> Tuple[bool, str, str]:
+        if not self.api_key:
+            return False, "", "openrouter_missing_api_key"
+        if not self.api_url:
+            return False, "", "openrouter_missing_api_url"
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.api_referer:
+            headers["HTTP-Referer"] = self.api_referer
+        if self.api_title:
+            headers["X-Title"] = self.api_title
+
+        payload = {
+            "model": self.api_model,
+            "messages": [
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+            "max_tokens": int(max_new_tokens),
+        }
+
+        try:
+            with httpx.Client(timeout=self.api_timeout) as client:
+                response = client.post(self.api_url, headers=headers, json=payload)
+            if response.status_code >= 400:
+                return False, "", f"openrouter_http_{response.status_code}"
+
+            data = response.json()
+            choices = data.get("choices") or []
+            if not choices:
+                return False, "", "openrouter_empty_choices"
+
+            message = choices[0].get("message") or {}
+            content = message.get("content", "")
+            if isinstance(content, list):
+                text_chunks = []
+                for chunk in content:
+                    if isinstance(chunk, dict) and chunk.get("type") == "text":
+                        text_chunks.append(str(chunk.get("text", "")))
+                content = "\n".join(text_chunks)
+
+            generated = str(content or "").strip()
+            if not generated:
+                return False, "", "openrouter_empty_content"
+
+            return True, generated, ""
+        except Exception as exc:
+            return False, "", f"openrouter_error: {str(exc)[:160]}"
 
     def _ensure_loaded(self):
         if not self.enabled:
@@ -148,18 +223,48 @@ class QwenPriorityService:
             self.generator = None
             print(f"[QwenPriority] Failed to load model: {exc}")
 
+    def _generate(self, prompt: str, max_new_tokens: int) -> Tuple[bool, str, str, str]:
+        """Generate text and return: (ok, generated_text, model_used, failure_reason)."""
+        provider_error = ""
+
+        if self._prefer_api():
+            ok, generated, reason = self._generate_with_openrouter(prompt, max_new_tokens)
+            if ok:
+                return True, generated, self.api_model, ""
+            provider_error = reason
+            if self.api_provider == "openrouter":
+                return False, "", "", provider_error
+
+        self._ensure_loaded()
+        if self.generator is None:
+            reason = self._load_error or "model_not_loaded"
+            if provider_error:
+                reason = f"{provider_error}; local_fallback_failed: {reason}"
+            return False, "", "", reason
+
+        try:
+            out = self.generator(
+                prompt,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                temperature=0.0,
+                return_full_text=False,
+            )
+            generated = out[0].get("generated_text", "") if out else ""
+            if not generated:
+                return False, "", "", "empty_local_generation"
+            return True, generated, self.model_name, ""
+        except Exception as exc:
+            reason = f"runtime_error: {exc}"
+            if provider_error:
+                reason = f"{provider_error}; local_runtime_error: {exc}"
+            return False, "", "", reason
+
     def score_issue(self, text: str, category: str, ward: str) -> Dict[str, Any]:
         """
         Returns structured score hints from Qwen model.
         If unavailable/failing, returns used=False with fallback reason.
         """
-        self._ensure_loaded()
-        if self.generator is None:
-            return {
-                "used": False,
-                "reason": self._load_error or "model_not_loaded",
-            }
-
         prompt = (
             "You are a civic complaint triage model. "
             "Given complaint text, output only strict JSON with this schema:\n"
@@ -177,15 +282,14 @@ class QwenPriorityService:
             f"Complaint: {text}\n"
         )
 
+        ok, generated, model_used, reason = self._generate(prompt, self.max_new_tokens)
+        if not ok:
+            return {
+                "used": False,
+                "reason": reason or "model_not_loaded",
+            }
+
         try:
-            out = self.generator(
-                prompt,
-                max_new_tokens=self.max_new_tokens,
-                do_sample=False,
-                temperature=0.0,
-                return_full_text=False,
-            )
-            generated = out[0].get("generated_text", "") if out else ""
             payload = _extract_json_block(generated)
 
             if not payload:
@@ -209,7 +313,7 @@ class QwenPriorityService:
                 "sentiment_score": round(sentiment_score, 1),
                 "confidence": round(confidence, 3),
                 "reasoning": reasoning,
-                "model": self.model_name,
+                "model": model_used,
             }
         except Exception as exc:
             return {
@@ -227,13 +331,6 @@ class QwenPriorityService:
         ward_hint: str,
     ) -> Dict[str, Any]:
         """Generate a concise citizen-friendly complaint description from image analysis."""
-        self._ensure_loaded()
-        if self.generator is None:
-            return {
-                "used": False,
-                "reason": self._load_error or "model_not_loaded",
-            }
-
         prompt = (
             "You rewrite municipal image-analysis signals into one short complaint statement.\n"
             "Return strict JSON only:\n"
@@ -252,15 +349,15 @@ class QwenPriorityService:
             f"Visible cues: {visible_cues or 'not specified'}\n"
         )
 
+        max_tokens = min(220, self.max_new_tokens)
+        ok, generated, model_used, reason = self._generate(prompt, max_tokens)
+        if not ok:
+            return {
+                "used": False,
+                "reason": reason or "model_not_loaded",
+            }
+
         try:
-            out = self.generator(
-                prompt,
-                max_new_tokens=min(220, self.max_new_tokens),
-                do_sample=False,
-                temperature=0.0,
-                return_full_text=False,
-            )
-            generated = out[0].get("generated_text", "") if out else ""
             payload = _extract_json_payload_relaxed(generated)
             if not payload:
                 # Salvage useful text even if JSON format is imperfect.
@@ -276,7 +373,7 @@ class QwenPriorityService:
                         "used": True,
                         "complaint_text": complaint_text[:380],
                         "urgency_note": "",
-                        "model": self.model_name,
+                        "model": model_used,
                     }
 
                 return {"used": False, "reason": "invalid_qwen_output"}
@@ -290,7 +387,7 @@ class QwenPriorityService:
                 "used": True,
                 "complaint_text": complaint_text[:380],
                 "urgency_note": urgency_note[:140],
-                "model": self.model_name,
+                "model": model_used,
             }
         except Exception as exc:
             return {

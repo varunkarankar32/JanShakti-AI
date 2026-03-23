@@ -14,6 +14,13 @@ SENTIMENT_MODEL = os.getenv("SENTIMENT_MODEL", "distilbert-base-uncased-finetune
 QWEN_PRIORITY_ENABLED = os.getenv("QWEN_PRIORITY_ENABLED", "true").lower() == "true"
 QWEN_PRIORITY_MODEL = os.getenv("QWEN_PRIORITY_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
 QWEN_PRIORITY_MAX_NEW_TOKENS = int(os.getenv("QWEN_PRIORITY_MAX_NEW_TOKENS", "220"))
+QWEN_API_PROVIDER = os.getenv("QWEN_API_PROVIDER", "auto")  # auto|local|openrouter
+QWEN_API_URL = os.getenv("QWEN_API_URL", "https://openrouter.ai/api/v1/chat/completions")
+QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")
+QWEN_API_MODEL = os.getenv("QWEN_API_MODEL", "qwen/qwen-2.5-7b-instruct:free")
+QWEN_API_TIMEOUT = int(os.getenv("QWEN_API_TIMEOUT", "45"))
+QWEN_API_REFERER = os.getenv("QWEN_API_REFERER", "")
+QWEN_API_TITLE = os.getenv("QWEN_API_TITLE", "JanShakti-AI")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 API_PREFIX = "/api"
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
