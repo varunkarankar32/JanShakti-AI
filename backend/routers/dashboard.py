@@ -264,7 +264,7 @@ def _compose_dashboard_payload(db: Session):
     urgent_complaints = (
         db.query(Complaint)
         .filter(Complaint.status != ComplaintStatus.RESOLVED)
-        .order_by(Complaint.created_at.desc())
+        .order_by(Complaint.ai_score.desc(), Complaint.created_at.desc())
         .limit(200)
         .all()
     )
@@ -302,7 +302,7 @@ def _compose_dashboard_payload(db: Session):
             "starvation_bonus": row["starvation_bonus"],
             "unresponded_hours": round(row["unresponded_hours"], 1),
         }
-        for i, row in enumerate(ranked_urgent[:5])
+        for i, row in enumerate(ranked_urgent[:15])
     ]
 
     trend_data = _trend_data(db, weeks=8)

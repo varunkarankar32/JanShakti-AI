@@ -747,16 +747,16 @@ def create_complaint(
     refined_description = extracted["description"]
     category = complaint.category if complaint.category else extracted["category"]
     ai_meta = extracted.get("ai", {})
-    defer_media_ai = bool(complaint.image_path or complaint.audio_path)
+    has_media = bool(complaint.image_path or complaint.audio_path)
 
     media_context_notes = []
 
     # Re-read citizen media from server storage so image/audio understanding is always
     # available for scoring, even if frontend submitted only a short placeholder text.
     image_bytes, image_name = (None, None)
-    if not defer_media_ai:
+    if not has_media:
         image_bytes, image_name = _read_media_from_path(complaint.image_path)
-    if image_bytes and not defer_media_ai:
+    if image_bytes and not has_media:
         try:
             image_extracted = complaint_extraction_service.extract_from_image(
                 image_bytes=image_bytes,
@@ -787,9 +787,9 @@ def create_complaint(
             media_context_notes.append(f"Image analysis unavailable: {str(exc)[:120]}")
 
     audio_bytes, audio_name = (None, None)
-    if not defer_media_ai:
+    if not has_media:
         audio_bytes, audio_name = _read_media_from_path(complaint.audio_path)
-    if audio_bytes and not defer_media_ai:
+    if audio_bytes and not has_media:
         try:
             ext = Path(audio_name or "voice.wav").suffix.lower().lstrip(".") or "wav"
             voice_extracted = complaint_extraction_service.extract_from_voice(
@@ -831,6 +831,7 @@ def create_complaint(
         longitude=complaint.longitude,
     )
 
+    # Always use fast heuristic for instant response; Qwen AI re-scores asynchronously
     priority_result = priority_engine.calculate_score(
         text=scoring_text,
         category=category,
@@ -838,12 +839,11 @@ def create_complaint(
         recurrence_count=recurrence_count,
         local_cluster_count=local_cluster_count,
         social_mentions=0,
-        enable_qwen=not defer_media_ai,
+        enable_qwen=False,
     )
 
-    if defer_media_ai:
-        ai_meta["background_ai_processing"] = "queued"
-        ai_meta["background_ai_processing_note"] = "Media understanding and Qwen re-scoring in progress"
+    ai_meta["background_ai_processing"] = "queued"
+    ai_meta["background_ai_processing_note"] = "AI Qwen re-scoring in progress"
 
     priority_level = PriorityLevel(priority_result["priority"])
     input_mode = InputMode(complaint.input_mode) if complaint.input_mode in [e.value for e in InputMode] else InputMode.TEXT
@@ -896,17 +896,17 @@ def create_complaint(
     db.commit()
     db.refresh(db_complaint)
 
-    if defer_media_ai:
-        _log_activity(
-            db,
-            db_complaint,
-            actor_role="system",
-            actor_name="AI Engine",
-            action="background_ai_enrichment_queued",
-            note="Complaint registered instantly; media/Qwen enrichment queued.",
-        )
-        db.commit()
-        background_tasks.add_task(_background_enrich_complaint_media, db_complaint.id)
+    # Always queue background AI enrichment (Qwen re-scoring + media processing if applicable)
+    _log_activity(
+        db,
+        db_complaint,
+        actor_role="system",
+        actor_name="AI Engine",
+        action="background_ai_enrichment_queued",
+        note="Complaint registered instantly; AI Qwen re-scoring queued.",
+    )
+    db.commit()
+    background_tasks.add_task(_background_enrich_complaint_media, db_complaint.id)
 
     return {
         "id": db_complaint.id,
@@ -1134,7 +1134,7 @@ def list_complaints(
         query = query.filter(Complaint.status == status)
 
     total = query.count()
-    complaints = query.order_by(desc(Complaint.created_at)).offset(offset).limit(limit).all()
+    complaints = query.order_by(desc(Complaint.ai_score), desc(Complaint.created_at)).offset(offset).limit(limit).all()
 
     return {
         "total": total,
