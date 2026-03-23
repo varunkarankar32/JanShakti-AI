@@ -139,6 +139,9 @@ class QwenPriorityService:
         self.api_title = str(QWEN_API_TITLE or "JanShakti-AI").strip()
         self.generator = None
         self._load_error = ""
+        self.last_error = ""
+        self.last_provider = ""
+        self.last_model_used = ""
 
     def _prefer_api(self) -> bool:
         if self.api_provider == "openrouter":
@@ -230,6 +233,9 @@ class QwenPriorityService:
         if self._prefer_api():
             ok, generated, reason = self._generate_with_openrouter(prompt, max_new_tokens)
             if ok:
+                self.last_provider = "openrouter"
+                self.last_model_used = self.api_model
+                self.last_error = ""
                 return True, generated, self.api_model, ""
             provider_error = reason
 
@@ -238,6 +244,9 @@ class QwenPriorityService:
             reason = self._load_error or "model_not_loaded"
             if provider_error:
                 reason = f"{provider_error}; local_fallback_failed: {reason}"
+            self.last_provider = "local"
+            self.last_model_used = ""
+            self.last_error = reason
             return False, "", "", reason
 
         try:
@@ -250,13 +259,49 @@ class QwenPriorityService:
             )
             generated = out[0].get("generated_text", "") if out else ""
             if not generated:
+                self.last_provider = "local"
+                self.last_model_used = self.model_name
+                self.last_error = "empty_local_generation"
                 return False, "", "", "empty_local_generation"
+            self.last_provider = "local"
+            self.last_model_used = self.model_name
+            self.last_error = ""
             return True, generated, self.model_name, ""
         except Exception as exc:
             reason = f"runtime_error: {exc}"
             if provider_error:
                 reason = f"{provider_error}; local_runtime_error: {exc}"
+            self.last_provider = "local"
+            self.last_model_used = self.model_name
+            self.last_error = reason
             return False, "", "", reason
+
+    def get_runtime_status(self) -> Dict[str, Any]:
+        local_available = bool(HF_AVAILABLE)
+        local_loaded = self.generator is not None
+
+        return {
+            "enabled": self.enabled,
+            "provider_mode": self.api_provider,
+            "prefer_api": self._prefer_api(),
+            "api": {
+                "configured": bool(self.api_key),
+                "url": self.api_url,
+                "model": self.api_model,
+                "timeout": self.api_timeout,
+            },
+            "local": {
+                "available": local_available,
+                "loaded": local_loaded,
+                "model": self.model_name,
+                "load_error": self._load_error,
+            },
+            "last": {
+                "provider": self.last_provider,
+                "model": self.last_model_used,
+                "error": self.last_error,
+            },
+        }
 
     def score_issue(self, text: str, category: str, ward: str) -> Dict[str, Any]:
         """
