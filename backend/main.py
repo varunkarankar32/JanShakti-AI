@@ -77,7 +77,11 @@ app.include_router(whatsapp.router, prefix=API_PREFIX)
 @app.on_event("startup")
 def startup():
     """Initialize database tables on startup."""
-    init_db()
+    try:
+        init_db()
+    except Exception as exc:
+        print(f"[WARN] Database initialization failed: {exc}")
+        print("[WARN] App will start but DB-dependent routes may fail.")
     print("=" * 60)
     print("  JanShakti.AI Backend — Running")
     print("  API Docs:  http://localhost:8000/docs")
