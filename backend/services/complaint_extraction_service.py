@@ -294,9 +294,23 @@ class ComplaintExtractionService:
         mapped_category = VISION_TO_CATEGORY.get(detected_category, "Others")
         gemini_result = gemini_vision_service.classify_issue(image_bytes=image_bytes, image_name=image_name)
 
+        detection_labels = {
+            str(d.get("class", "")).strip().lower()
+            for d in (vision_result.get("detections") or [])
+            if str(d.get("class", "")).strip()
+        }
+        has_road_signal = any(
+            token in detection_labels
+            for token in {"pothole", "road_crack", "road_damage", "infrastructure_issue"}
+        )
+
         if gemini_result.get("used"):
             gemini_category = str(gemini_result.get("category") or "").strip()
-            if gemini_category and gemini_category != mapped_category:
+            # Keep strong road signals from CV from being replaced by pipe/water categories.
+            if has_road_signal and gemini_category == "Water Supply":
+                gemini_category = "Roads & Potholes"
+
+            if gemini_category and gemini_category != "Others" and gemini_category != mapped_category:
                 mapped_category = gemini_category
                 vision_result = dict(vision_result)
                 vision_result["category_original"] = detected_category

@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import ast
 from typing import Any, Dict, Optional
 
 import httpx
@@ -63,6 +64,57 @@ def _extract_json(text: str) -> Dict[str, Any]:
     return {}
 
 
+def _extract_json_relaxed(text: str) -> Dict[str, Any]:
+    payload = _extract_json(text)
+    if payload:
+        return payload
+
+    if not text:
+        return {}
+
+    raw = str(text).strip().replace("```json", "").replace("```", "")
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return {}
+
+    candidate = raw[start : end + 1].strip()
+    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    try:
+        parsed = ast.literal_eval(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    return {}
+
+
+def _infer_category_from_text(raw_text: str) -> Optional[str]:
+    text = str(raw_text or "").lower()
+    keyword_map = {
+        "Roads & Potholes": ["pothole", "road", "crack", "asphalt", "road damage"],
+        "Garbage & Sanitation": ["garbage", "trash", "waste", "dump", "sanitation"],
+        "Water Supply": ["pipe", "water supply", "leak", "broken pipe", "tap"],
+        "Drainage": ["drain", "drainage", "waterlogging", "overflow", "sewer"],
+        "Electricity": ["streetlight", "street light", "electric", "pole", "power"],
+        "Safety & Security": ["fallen tree", "unsafe", "hazard", "wall", "danger"],
+    }
+
+    for category, keywords in keyword_map.items():
+        if any(keyword in text for keyword in keywords):
+            return category
+    return None
+
+
 class GeminiVisionService:
     def __init__(self):
         self.enabled = GEMINI_VISION_ENABLED
@@ -106,7 +158,9 @@ class GeminiVisionService:
             ],
             "generationConfig": {
                 "temperature": 0,
-                "maxOutputTokens": 160,
+                "maxOutputTokens": 512,
+                "responseMimeType": "application/json",
+                "thinkingConfig": {"thinkingBudget": 0},
             },
         }
 
@@ -129,8 +183,20 @@ class GeminiVisionService:
             parts = ((candidates[0].get("content") or {}).get("parts") or [])
             text_chunks = [str(p.get("text", "")) for p in parts if isinstance(p, dict) and p.get("text")]
             raw_text = "\n".join(text_chunks).strip()
-            parsed = _extract_json(raw_text)
+            parsed = _extract_json_relaxed(raw_text)
             if not parsed:
+                inferred = _infer_category_from_text(raw_text)
+                if inferred:
+                    self.last_error = ""
+                    return {
+                        "used": True,
+                        "category": inferred,
+                        "issue_label": "infrastructure_issue",
+                        "confidence": 0.62,
+                        "reason": "parsed_from_unstructured_gemini_text",
+                        "model": self.model,
+                    }
+
                 self.last_error = "gemini_invalid_json"
                 return {"used": False, "reason": "gemini_invalid_json"}
 

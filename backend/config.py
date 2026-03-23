@@ -23,7 +23,7 @@ QWEN_API_REFERER = os.getenv("QWEN_API_REFERER", "")
 QWEN_API_TITLE = os.getenv("QWEN_API_TITLE", "JanShakti-AI")
 GEMINI_VISION_ENABLED = os.getenv("GEMINI_VISION_ENABLED", "true").lower() == "true"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_API_URL = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/models")
 GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "30"))
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
