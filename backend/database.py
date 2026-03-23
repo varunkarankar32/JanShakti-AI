@@ -1,5 +1,7 @@
+import logging
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.exc import OperationalError
 from config import (
     DATABASE_URL,
     DEFAULT_LEADER_NAME,
@@ -10,8 +12,9 @@ from config import (
     DEFAULT_AUTHORITY_PASSWORD,
 )
 
-IS_SQLITE = DATABASE_URL.startswith("sqlite")
+logger = logging.getLogger(__name__)
 
+<<<<<<< HEAD
 engine_kwargs = {"pool_pre_ping": True}
 if IS_SQLITE:
     engine_kwargs["connect_args"] = {"check_same_thread": False}
@@ -20,13 +23,42 @@ else:
     engine_kwargs["pool_size"] = 5
     engine_kwargs["max_overflow"] = 10
     engine_kwargs["pool_recycle"] = 300
+=======
+FALLBACK_SQLITE_URL = "sqlite:///./janshakti.db"
+>>>>>>> d67253a7ef990e8e333bd37e8e2de0f9db913431
 
-engine = create_engine(DATABASE_URL, **engine_kwargs)
+
+def _build_engine(url: str):
+    """Create a SQLAlchemy engine for the given URL."""
+    is_sqlite = url.startswith("sqlite")
+    kwargs = {"pool_pre_ping": True}
+    if is_sqlite:
+        kwargs["connect_args"] = {"check_same_thread": False}
+    else:
+        kwargs["connect_args"] = {"connect_timeout": 10}
+        kwargs["pool_recycle"] = 300
+        kwargs["pool_size"] = 5
+        kwargs["max_overflow"] = 10
+    return create_engine(url, **kwargs), is_sqlite
+
+
+# --- Build initial engine ---------------------------------------------------
+_active_url = DATABASE_URL
+engine, IS_SQLITE = _build_engine(_active_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 class Base(DeclarativeBase):
     pass
+
+
+def _switch_to_sqlite():
+    """Fall back to a local SQLite database when PostgreSQL is unreachable."""
+    global engine, SessionLocal, IS_SQLITE, _active_url  # noqa: PLW0603
+    print("[DB] ⚠️  PostgreSQL unreachable — falling back to local SQLite database")
+    _active_url = FALLBACK_SQLITE_URL
+    engine, IS_SQLITE = _build_engine(FALLBACK_SQLITE_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def get_db():
@@ -38,10 +70,8 @@ def get_db():
 
 
 def _ensure_user_role_column():
-    # Lightweight migration for existing SQLite DBs created before role support.
     if not IS_SQLITE:
         return
-
     with engine.connect() as conn:
         result = conn.execute(text("PRAGMA table_info(users)"))
         columns = [row[1] for row in result.fetchall()]
@@ -51,7 +81,6 @@ def _ensure_user_role_column():
 
 
 def _ensure_complaint_workflow_columns():
-    # Lightweight migration for existing SQLite DBs before workflow fields.
     if not IS_SQLITE:
         return
 
@@ -140,8 +169,26 @@ def _seed_default_authority():
 
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
-    _ensure_user_role_column()
-    _ensure_complaint_workflow_columns()
-    _seed_default_leader()
-    _seed_default_authority()
+    """Initialize database tables. If PostgreSQL is unreachable,
+    automatically fall back to a local SQLite database so the app
+    can still start and serve requests."""
+    try:
+        Base.metadata.create_all(bind=engine)
+    except (OperationalError, Exception) as exc:
+        if not IS_SQLITE:
+            print(f"[DB] PostgreSQL connection failed: {exc}")
+            _switch_to_sqlite()
+            # Retry with SQLite
+            Base.metadata.create_all(bind=engine)
+        else:
+            raise
+
+    try:
+        if IS_SQLITE:
+            _ensure_user_role_column()
+            _ensure_complaint_workflow_columns()
+        _seed_default_leader()
+        _seed_default_authority()
+        print(f"[DB] ✅ Database initialized successfully (using {'SQLite' if IS_SQLITE else 'PostgreSQL'})")
+    except Exception as exc:
+        print(f"[DB] Warning — seeding/migration issue (non-fatal): {exc}")

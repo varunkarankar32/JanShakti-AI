@@ -585,3 +585,143 @@ img {
   font-weight: 500;
   margin-top: 6px;
 }
+
+/* ============================================
+   WhatsApp Floating Widget
+   ============================================ */
+.whatsapp-widget {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform var(--transition-base);
+  filter: drop-shadow(0 4px 20px rgba(37, 211, 102, 0.3));
+}
+
+.whatsapp-widget:hover {
+  transform: scale(1.08);
+  filter: drop-shadow(0 6px 28px rgba(37, 211, 102, 0.45));
+}
+
+/* Avatar container with bounce animation */
+.whatsapp-avatar-container {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  animation: whatsappBounce 3s ease-in-out infinite;
+}
+
+.whatsapp-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid #25D366;
+  box-shadow: 0 4px 16px rgba(37, 211, 102, 0.35);
+}
+
+/* WhatsApp logo badge — pulse/blink animation */
+.whatsapp-logo-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 26px;
+  height: 26px;
+  background: #25D366;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  animation: whatsappLogoPulse 1.5s ease-in-out infinite;
+  box-shadow: 0 2px 8px rgba(37, 211, 102, 0.5);
+}
+
+/* Typing text bubble */
+.whatsapp-typing-text {
+  background: #25D366;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 12px;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(37, 211, 102, 0.3);
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  letter-spacing: 0.2px;
+}
+
+/* Blinking cursor for typing */
+.typing-cursor {
+  display: inline-block;
+  margin-left: 1px;
+  font-weight: 300;
+  opacity: 0;
+}
+
+.typing-cursor.blink {
+  animation: cursorBlink 0.6s step-end infinite;
+}
+
+/* ---- Keyframes ---- */
+@keyframes whatsappBounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes whatsappLogoPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Responsive — slightly smaller on mobile */
+@media (max-width: 768px) {
+  .whatsapp-widget {
+    bottom: 16px;
+    right: 16px;
+  }
+
+  .whatsapp-avatar-container {
+    width: 58px;
+    height: 58px;
+  }
+
+  .whatsapp-avatar {
+    width: 58px;
+    height: 58px;
+  }
+
+  .whatsapp-logo-badge {
+    width: 22px;
+    height: 22px;
+  }
+
+  .whatsapp-typing-text {
+    font-size: 0.65rem;
+    padding: 4px 10px;
+  }
+}

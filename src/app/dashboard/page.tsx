@@ -191,6 +191,9 @@ export default function DashboardPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const assignPanelRef = useRef<HTMLDivElement | null>(null);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [trustData, setTrustData] = useState<any>(null);
+
   const handleLeaderLogout = useCallback(() => {
     setLeaderToken('');
     setLeaderUser(null);
@@ -755,6 +758,51 @@ export default function DashboardPage() {
                     ))}
                   </div>
                 </div>
+              </div>
+
+              {/* === PUBLIC TRUST INDICATORS === */}
+              <div className="glass-card" style={{ padding: 24, marginBottom: 24, border: '1px solid rgba(139,92,246,0.3)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>🛡️ Public Trust Indicators</h3>
+                  <span style={{ fontSize: '0.68rem', background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>AI Computed</span>
+                </div>
+
+                {!trustData ? (
+                  <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+                    <button className="btn btn-secondary" onClick={async () => {
+                      try {
+                        const res = await fetch(`${API_BASE}/api/dashboard/trust-indicators`);
+                        if (res.ok) setTrustData(await res.json());
+                      } catch { /* ignore */ }
+                    }}>Load Trust Indicators</button>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                      <div style={{ fontSize: '2.2rem', fontWeight: 800, fontFamily: 'Outfit', color: trustData.overall_trust_score >= 70 ? '#22c55e' : trustData.overall_trust_score >= 40 ? '#f59e0b' : '#dc2626' }}>
+                        {trustData.overall_trust_score}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>Overall Trust Score / 100</div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
+                      {(trustData.indicators || []).map((ind: { name: string; score: number; icon: string; color: string }) => (
+                        <div key={ind.name} style={{ textAlign: 'center', padding: 12, border: '1px solid var(--border-subtle)', borderRadius: 10 }}>
+                          <div style={{ fontSize: '1.2rem', marginBottom: 4 }}>{ind.icon}</div>
+                          <div style={{ position: 'relative', width: 60, height: 60, margin: '0 auto 8px' }}>
+                            <svg width="60" height="60" viewBox="0 0 60 60">
+                              <circle cx="30" cy="30" r="26" fill="none" stroke="var(--border-subtle)" strokeWidth="6" />
+                              <circle cx="30" cy="30" r="26" fill="none" stroke={ind.color} strokeWidth="6"
+                                strokeDasharray={`${(ind.score / 100) * 163.36} 163.36`}
+                                strokeLinecap="round" transform="rotate(-90 30 30)" style={{ transition: 'stroke-dasharray 0.8s ease' }} />
+                            </svg>
+                            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '0.78rem', fontWeight: 700, color: ind.color }}>{ind.score}</div>
+                          </div>
+                          <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', fontWeight: 600 }}>{ind.name}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
