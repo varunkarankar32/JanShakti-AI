@@ -9,7 +9,7 @@ from models.complaint import Complaint, ComplaintStatus, PriorityLevel
 from models.user import User
 from database import get_db
 from routers.auth import get_current_leader
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from services.priority_engine import priority_engine
 from services.civic_intelligence_service import civic_intelligence_service
 
@@ -23,7 +23,8 @@ def _unresponded_hours(complaint: Complaint) -> float:
         return 0.0
     if not complaint.created_at:
         return 0.0
-    return max(0.0, (datetime.now() - complaint.created_at).total_seconds() / 3600.0)
+    created = complaint.created_at if complaint.created_at.tzinfo else complaint.created_at.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - created).total_seconds() / 3600.0)
 
 
 def _effective_priority_snapshot(complaint: Complaint):
@@ -69,7 +70,7 @@ def _avg_resolution_days(db: Session) -> float:
 
 
 def _trend_data(db: Session, weeks: int = 8):
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     result = []
 
     for idx in range(weeks):
@@ -213,7 +214,7 @@ def _trust_index(resolution_rate: float, avg_rating: float, avg_response_days: f
 def _compose_dashboard_payload(db: Session):
     total = db.query(Complaint).count()
     resolved = db.query(Complaint).filter(Complaint.status == ComplaintStatus.RESOLVED).count()
-    today_start = datetime.now().replace(hour=0, minute=0, second=0)
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)
 
     complaints_today = db.query(Complaint).filter(Complaint.created_at >= today_start).count()
     resolved_today = db.query(Complaint).filter(
@@ -263,7 +264,7 @@ def _compose_dashboard_payload(db: Session):
     urgent_complaints = (
         db.query(Complaint)
         .filter(Complaint.status != ComplaintStatus.RESOLVED)
-        .order_by(Complaint.created_at.desc())
+        .order_by(Complaint.ai_score.desc(), Complaint.created_at.desc())
         .limit(200)
         .all()
     )
@@ -301,7 +302,7 @@ def _compose_dashboard_payload(db: Session):
             "starvation_bonus": row["starvation_bonus"],
             "unresponded_hours": round(row["unresponded_hours"], 1),
         }
-        for i, row in enumerate(ranked_urgent[:5])
+        for i, row in enumerate(ranked_urgent[:15])
     ]
 
     trend_data = _trend_data(db, weeks=8)

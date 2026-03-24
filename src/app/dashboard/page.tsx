@@ -138,11 +138,11 @@ interface LeaderAnnouncement {
 }
 
 const DEFAULT_KPIS = [
-  { label: 'Issues Tracked', value: '0', icon: '📋', color: '#3b82f6', change: 'Live from DB' },
-  { label: 'Resolution Rate', value: '0%', icon: '✅', color: '#22c55e', change: 'Resolved / Total' },
-  { label: 'Open Issues', value: '0', icon: '🔴', color: '#ef4444', change: 'Needs attention' },
-  { label: 'In Progress', value: '0', icon: '⚡', color: '#f59e0b', change: 'Being worked on' },
-  { label: 'Avg AI Score', value: '0', icon: '🤖', color: '#8b5cf6', change: 'Priority score' },
+  { label: 'Issues Tracked', value: '0', icon: '', color: '#3b82f6', change: 'Live from DB' },
+  { label: 'Resolution Rate', value: '0%', icon: '', color: '#22c55e', change: 'Resolved / Total' },
+  { label: 'Open Issues', value: '0', icon: '', color: '#ef4444', change: 'Needs attention' },
+  { label: 'In Progress', value: '0', icon: '', color: '#f59e0b', change: 'Being worked on' },
+  { label: 'Avg AI Score', value: '0', icon: '', color: '#8b5cf6', change: 'Priority score' },
 ];
 
 function safeStorageGet(key: string): string {
@@ -483,7 +483,7 @@ export default function DashboardPage() {
 
       if (!res.ok) {
         const detail = await parseDetail(res);
-        setActionMessage(`✕ ${detail}`);
+        setActionMessage(` ${detail}`);
         return;
       }
 
@@ -495,7 +495,7 @@ export default function DashboardPage() {
       }
       await fetchData();
     } catch {
-      setActionMessage('✕ Unable to update workflow right now.');
+      setActionMessage(' Unable to update workflow right now.');
     } finally {
       setActionLoading(false);
     }
@@ -505,7 +505,7 @@ export default function DashboardPage() {
     if (!leaderToken || !selectedComplaint) return;
     const file = stage === 'before' ? beforePhotoFile : afterPhotoFile;
     if (!file) {
-      setActionMessage(`✕ Select a ${stage} photo first.`);
+      setActionMessage(` Select a ${stage} photo first.`);
       return;
     }
 
@@ -526,14 +526,14 @@ export default function DashboardPage() {
 
       if (!res.ok) {
         const detail = await parseDetail(res);
-        setActionMessage(`✕ ${detail}`);
+        setActionMessage(` ${detail}`);
         return;
       }
 
-      setActionMessage(`✓ ${stage === 'before' ? 'Before' : 'After'} photo uploaded for verification`);
+      setActionMessage(` ${stage === 'before' ? 'Before' : 'After'} photo uploaded for verification`);
       await fetchData();
     } catch {
-      setActionMessage('✕ Failed to upload verification photo');
+      setActionMessage(' Failed to upload verification photo');
     } finally {
       setActionLoading(false);
     }
@@ -552,17 +552,17 @@ export default function DashboardPage() {
 
       if (!res.ok) {
         const detail = await parseDetail(res);
-        setActionMessage(`✕ ${detail}`);
+        setActionMessage(` ${detail}`);
         return;
       }
 
       const payload = await res.json();
       const engine = payload?.verification_engine ? ` via ${payload.verification_engine}` : '';
       const model = payload?.verification_model ? ` (${payload.verification_model})` : '';
-      setActionMessage(`✓ Verification ${payload.verification_status} (score ${payload.verification_score}/100)${engine}${model}`);
+      setActionMessage(` Verification ${payload.verification_status} (score ${payload.verification_score}/100)${engine}${model}`);
       await fetchData();
     } catch {
-      setActionMessage('✕ Verification engine failed');
+      setActionMessage(' Verification engine failed');
     } finally {
       setActionLoading(false);
     }
@@ -588,11 +588,11 @@ export default function DashboardPage() {
   }, [activeView, selectedTicket]);
 
   const kpis = stats ? [
-    { label: 'Issues Tracked', value: String(stats.total_complaints), icon: '📋', color: '#3b82f6', change: `${stats.complaints_today} today` },
-    { label: 'Resolution Rate', value: `${stats.resolution_rate}%`, icon: '✅', color: '#22c55e', change: `${stats.resolved_today} resolved today` },
-    { label: 'P0 Active', value: String(stats.p0_active), icon: '🔴', color: '#ef4444', change: 'Critical issues' },
-    { label: 'Pending Verify', value: String(stats.pending_verification), icon: '⚡', color: '#f59e0b', change: 'Awaiting check' },
-    { label: 'Trust Index', value: `${stats.trust_index}/100`, icon: '🛡️', color: '#8b5cf6', change: `${stats.avg_response_days} day avg response` },
+    { label: 'Issues Tracked', value: String(stats.total_complaints), icon: '', color: '#3b82f6', change: `${stats.complaints_today} today` },
+    { label: 'Resolution Rate', value: `${stats.resolution_rate}%`, icon: '', color: '#22c55e', change: `${stats.resolved_today} resolved today` },
+    { label: 'P0 Active', value: String(stats.p0_active), icon: '', color: '#ef4444', change: 'Critical issues' },
+    { label: 'Pending Verify', value: String(stats.pending_verification), icon: '', color: '#f59e0b', change: 'Awaiting check' },
+    { label: 'Trust Index', value: `${stats.trust_index}/100`, icon: '️', color: '#8b5cf6', change: `${stats.avg_response_days} day avg response` },
   ] : DEFAULT_KPIS;
 
   if (authChecking) {
@@ -645,7 +645,7 @@ export default function DashboardPage() {
             </button>
           </form>
 
-          {authError && <div style={{ marginTop: 12, color: '#b91c1c', fontSize: '0.85rem' }}>✕ {authError}</div>}
+          {authError && <div style={{ marginTop: 12, color: '#b91c1c', fontSize: '0.85rem' }}> {authError}</div>}
           <div style={{ marginTop: 12, fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
             Default leader email: leader@janshakti.ai
           </div>
@@ -665,11 +665,18 @@ export default function DashboardPage() {
         }}>
           <div style={{ padding: '8px 12px', fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: 2, marginBottom: 8 }}>COMMAND CENTER</div>
           {[
+<<<<<<< HEAD
             { key: 'overview', icon: '📊', label: 'Overview' },
             { key: 'complaints', icon: '📋', label: 'All Complaints' },
             { key: 'alerts', icon: '🚨', label: 'Smart Alerts' },
             { key: 'actions', icon: '📝', label: 'Action Queue' },
             { key: 'announcements', icon: '📢', label: 'Announcements' },
+=======
+            { key: 'overview', icon: '', label: 'Overview' },
+            { key: 'complaints', icon: '', label: 'All Complaints' },
+            { key: 'alerts', icon: '', label: 'Smart Alerts' },
+            { key: 'actions', icon: '', label: 'Action Queue' },
+>>>>>>> 25f37d9b2e519f8998ba23965ae79bd23ef51c09
           ].map(item => (
             <div key={item.key} className="sidebar-item" onClick={() => setActiveView(item.key)}
               style={{
@@ -708,7 +715,7 @@ export default function DashboardPage() {
               background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)',
               color: 'var(--accent-blue-light)', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600,
               fontFamily: 'Inter, sans-serif',
-            }}>🔄 Refresh Now</button>
+            }}> Refresh Now</button>
           </div>
         </div>
 
@@ -718,10 +725,10 @@ export default function DashboardPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
             <div>
               <h1 style={{ fontSize: '1.8rem', fontWeight: 800, fontFamily: 'Outfit, sans-serif', marginBottom: 4 }}>
-                🏛️ Leader&apos;s Command Dashboard
+                ️ Leader&apos;s Command Dashboard
               </h1>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                {backendOnline ? 'Live data from AI backend — auto-refreshes every 15 seconds' : '⚠️ Backend offline — start it with: uvicorn main:app --port 8010'}
+                {backendOnline ? 'Live data from AI backend — auto-refreshes every 15 seconds' : '️ Backend offline — start it with: uvicorn main:app --port 8010'}
               </p>
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -755,7 +762,7 @@ export default function DashboardPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 24 }}>
                 {/* Trend Chart */}
                 <div className="glass-card" style={{ padding: 24 }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>📈 Trend Analytics (8 Weeks)</h3>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}> Trend Analytics (8 Weeks)</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {(stats?.trend_data || []).map((week) => (
                       <div key={week.week} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -780,15 +787,15 @@ export default function DashboardPage() {
                     ))}
                   </div>
                   <div style={{ display: 'flex', gap: 16, marginTop: 12 }}>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>🔴 Complaints</span>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>🟢 Resolved</span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}> Complaints</span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}> Resolved</span>
                     <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>⭐ Satisfaction</span>
                   </div>
                 </div>
 
                 {/* Live Category Distribution from backend */}
                 <div className="glass-card" style={{ padding: 24 }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>📊 By Category {stats ? '(Live)' : ''}</h3>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}> By Category {stats ? '(Live)' : ''}</h3>
                   {stats && stats.category_distribution && stats.category_distribution.length > 0 ? (
                     stats.category_distribution.map((cat) => {
                       const total = stats.total_complaints || 1;
@@ -814,7 +821,7 @@ export default function DashboardPage() {
               {/* Heat Map & Alerts Row */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
                 <div className="glass-card" style={{ padding: 24 }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>🗺️ Ward Heat Map</h3>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>️ Ward Heat Map</h3>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                     {(stats?.ward_heat_data || []).map(ward => (
                       <div key={ward.ward} style={{
@@ -834,7 +841,7 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="glass-card" style={{ padding: 24 }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>🚨 Smart Alerts</h3>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}> Smart Alerts</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {(stats?.alerts || []).map((alert, idx) => (
                       <div key={`${alert.type}-${idx}`} style={{
@@ -900,7 +907,7 @@ export default function DashboardPage() {
 
               <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 14 }}>
-                  ✅ Authority Completion Queue
+                   Authority Completion Queue
                   <span style={{ fontSize: '0.75rem', fontWeight: 500, color: '#f59e0b', marginLeft: 8 }}>
                     ({verificationRequests.length} awaiting leader verification)
                   </span>
@@ -977,7 +984,7 @@ export default function DashboardPage() {
 
               {/* Incident Clusters */}
               <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
-                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>🧠 Incident Clusters (AI Merged)</h3>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}> Incident Clusters (AI Merged)</h3>
                 {incidents.length === 0 ? (
                   <div style={{ color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>No active clusters detected in the selected window.</div>
                 ) : (
@@ -1008,7 +1015,7 @@ export default function DashboardPage() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
                 <div className="glass-card" style={{ padding: 24 }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>📢 Proactive Announcements</h3>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}> Proactive Announcements</h3>
                   {(stats?.proactive_announcements || []).slice(0, 4).map((a, idx) => (
                     <div key={`${a.ward}-${idx}`} style={{ borderBottom: '1px solid var(--border-subtle)', padding: '8px 0' }}>
                       <div style={{ fontSize: '0.8rem', fontWeight: 700 }}>{a.alert_type} • {a.ward}</div>
@@ -1021,7 +1028,7 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="glass-card" style={{ padding: 24 }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>🔎 Rumor Fact Check</h3>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}> Rumor Fact Check</h3>
                   {(stats?.fact_checks || []).slice(0, 3).map((f, idx) => (
                     <div key={`${f.claim}-${idx}`} style={{ borderBottom: '1px solid var(--border-subtle)', padding: '8px 0' }}>
                       <div style={{ fontSize: '0.78rem' }}><strong>Claim:</strong> {f.claim}</div>
@@ -1076,7 +1083,7 @@ export default function DashboardPage() {
                                   <span style={{ fontSize: '0.8rem', color: sConfig?.color || '#64748b' }}>{sConfig?.label || c.status}</span>
                                 </span>
                               </td>
-                              <td style={{ padding: '12px', fontSize: '0.8rem' }}>{c.input_mode === 'voice' ? '🎤' : c.input_mode === 'photo' ? '📸' : '💬'}</td>
+                              <td style={{ padding: '12px', fontSize: '0.8rem' }}>{c.input_mode === 'voice' ? '' : c.input_mode === 'photo' ? '' : ''}</td>
                             </tr>
                           );
                         })}
@@ -1091,7 +1098,7 @@ export default function DashboardPage() {
           {activeView === 'complaints' && (
             <div className="glass-card" style={{ padding: 24 }}>
               <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>
-                📋 All Complaints {backendOnline && <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#22c55e' }}>({complaints.length} from DB)</span>}
+                 All Complaints {backendOnline && <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#22c55e' }}>({complaints.length} from DB)</span>}
               </h3>
               {complaints.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-tertiary)' }}>
@@ -1129,7 +1136,7 @@ export default function DashboardPage() {
                                 <span style={{ fontSize: '0.8rem', color: sConfig?.color || '#64748b' }}>{sConfig?.label || c.status}</span>
                               </span>
                             </td>
-                            <td style={{ padding: '12px', fontSize: '0.8rem' }}>{c.input_mode === 'voice' ? '🎤' : c.input_mode === 'photo' ? '📸' : '💬'}</td>
+                            <td style={{ padding: '12px', fontSize: '0.8rem' }}>{c.input_mode === 'voice' ? '' : c.input_mode === 'photo' ? '' : ''}</td>
                             <td style={{ padding: '12px', fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
                               {c.created_at ? new Date(c.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}
                             </td>
@@ -1326,7 +1333,7 @@ export default function DashboardPage() {
                           assigned_team: selectedComplaint.assigned_to || null,
                           leader_note: leaderNote || null,
                         },
-                        '✓ Assigned to authority'
+                        ' Assigned to authority'
                       )}
                     >Assign</button>
 
@@ -1341,7 +1348,7 @@ export default function DashboardPage() {
                           subject: mailSubject || null,
                           message: mailMessage || null,
                         },
-                        '✓ Authority mail dispatched (or mailto prepared)'
+                        ' Authority mail dispatched (or mailto prepared)'
                       )}
                     >Mail Authority</button>
 
@@ -1351,7 +1358,7 @@ export default function DashboardPage() {
                       onClick={() => runLeaderAction(
                         `/api/complaints/${selectedComplaint.ticket_id}/leader/status`,
                         { status: 'in_progress', leader_note: leaderNote || null },
-                        '✓ Marked in progress'
+                        ' Marked in progress'
                       )}
                     >In Progress</button>
 
@@ -1365,7 +1372,7 @@ export default function DashboardPage() {
                           response: authorityResponse || 'Field team submitted update.',
                           mark_verification_ready: false,
                         },
-                        '✓ Authority response recorded'
+                        ' Authority response recorded'
                       )}
                     >Save Response</button>
 
@@ -1379,7 +1386,7 @@ export default function DashboardPage() {
                           response: authorityResponse || 'Work completed by authority.',
                           mark_verification_ready: true,
                         },
-                        '✓ Sent to verification queue'
+                        ' Sent to verification queue'
                       )}
                     >Ready for Verification</button>
 
@@ -1389,7 +1396,7 @@ export default function DashboardPage() {
                       onClick={() => runLeaderAction(
                         `/api/complaints/${selectedComplaint.ticket_id}/leader/status`,
                         { status: 'verification', leader_note: leaderNote || null },
-                        '✓ Moved to verification'
+                        ' Moved to verification'
                       )}
                     >Verification</button>
 
@@ -1404,7 +1411,7 @@ export default function DashboardPage() {
                           resolution_note: leaderNote || authorityResponse || 'Resolved and verified by leader.',
                           citizen_update: `Leader verified completion for ${selectedComplaint.ticket_id}. Issue marked solved.`,
                         },
-                        '✓ Marked as solved and notified'
+                        ' Marked as solved and notified'
                       )}
                     >Mark Solved</button>
 
@@ -1414,13 +1421,13 @@ export default function DashboardPage() {
                       onClick={() => runLeaderAction(
                         `/api/complaints/${selectedComplaint.ticket_id}/leader/status`,
                         { status: 'open', leader_note: leaderNote || 'Reopened by leader for additional work.' },
-                        '✓ Complaint reopened for additional action'
+                        ' Complaint reopened for additional action'
                       )}
                     >Reopen</button>
                   </div>
 
                   {(selectedComplaint.citizen_update || actionMessage) && (
-                    <div style={{ marginTop: 10, fontSize: '0.8rem', color: actionMessage.startsWith('✕') ? '#b91c1c' : 'var(--text-secondary)' }}>
+                    <div style={{ marginTop: 10, fontSize: '0.8rem', color: actionMessage.startsWith('') ? '#b91c1c' : 'var(--text-secondary)' }}>
                       {actionMessage || selectedComplaint.citizen_update}
                     </div>
                   )}
@@ -1431,7 +1438,7 @@ export default function DashboardPage() {
 
           {activeView === 'alerts' && (
             <div className="glass-card" style={{ padding: 24 }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>🚨 All Smart Alerts</h3>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}> All Smart Alerts</h3>
               {(stats?.alerts || []).map((alert, idx) => (
                 <div key={`${alert.type}-${idx}`} style={{
                   display: 'flex', alignItems: 'flex-start', gap: 12, padding: 16, borderRadius: 10,
@@ -1451,7 +1458,7 @@ export default function DashboardPage() {
 
           {activeView === 'actions' && (
             <div className="glass-card" style={{ padding: 24 }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>📝 AI-Ranked Action Queue</h3>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}> AI-Ranked Action Queue</h3>
               {(stats?.action_queue || []).map(action => (
                 <div key={action.rank} style={{
                   display: 'flex', alignItems: 'center', gap: 16, padding: 16, borderRadius: 10,

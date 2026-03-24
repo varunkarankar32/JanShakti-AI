@@ -700,6 +700,132 @@ class GeminiAIService:
             "ai_model": self.MODEL_NAME,
         }
 
+    # ──────────────────────────────────────────────
+    # 7. AI PRIORITY SCORING (replaces heuristic)
+    # ──────────────────────────────────────────────
+
+    async def score_priority(
+        self,
+        text: str,
+        category: str,
+        ward: str,
+    ) -> Dict[str, Any]:
+        """
+        Use Gemini 2.5 Flash to score complaint priority.
+        Returns urgency, impact, sentiment scores — same schema as Qwen.
+        """
+        prompt = (
+            "You are a civic complaint triage AI for Indian municipal governance. "
+            "Analyze this complaint and return strict JSON:\n"
+            "{\n"
+            '  "urgency": number 0-100 (how time-sensitive is this issue),\n'
+            '  "impact": number 0-100 (how many people are affected, proximity to schools/hospitals),\n'
+            '  "sentiment_label": "negative"|"neutral"|"positive",\n'
+            '  "sentiment_score": number 0-100 (higher = more public frustration),\n'
+            '  "confidence": number 0-1,\n'
+            '  "reasoning": "short single-line explanation of the scoring"\n'
+            "}\n"
+            "Rules: No markdown. JSON only. Be data-driven.\n\n"
+            f"Category: {category}\n"
+            f"Ward: {ward}\n"
+            f"Complaint: {text[:800]}\n"
+        )
+
+        parts = [{"text": prompt}]
+
+        try:
+            result = await self._call_gemini(parts, temperature=0, max_tokens=512)
+        except Exception as exc:
+            return {"used": False, "reason": f"gemini_error: {str(exc)[:160]}"}
+
+        if not result.get("ok"):
+            return {"used": False, "reason": result.get("reason", "gemini_error")}
+
+        parsed = result.get("parsed", {})
+        if not parsed:
+            return {"used": False, "reason": "gemini_parse_failed"}
+
+        sentiment_label = str(parsed.get("sentiment_label", "neutral")).strip().lower()
+        if sentiment_label not in {"negative", "neutral", "positive"}:
+            sentiment_label = "neutral"
+
+        return {
+            "used": True,
+            "urgency": round(_clamp(parsed.get("urgency"), 0, 100, 50), 1),
+            "impact": round(_clamp(parsed.get("impact"), 0, 100, 50), 1),
+            "sentiment_label": sentiment_label,
+            "sentiment_score": round(_clamp(parsed.get("sentiment_score"), 0, 100, 45), 1),
+            "confidence": round(_clamp(parsed.get("confidence"), 0, 1, 0.7), 3),
+            "reasoning": str(parsed.get("reasoning", "")).strip()[:300],
+            "model": self.MODEL_NAME,
+        }
+
+    # ──────────────────────────────────────────────
+    # 8. LEADER BRIEF PER COMPLAINT
+    # ──────────────────────────────────────────────
+
+    async def generate_leader_brief(
+        self,
+        description: str,
+        category: str,
+        ward: str,
+        title: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Generate a concise AI analysis brief for leaders to review per complaint.
+        """
+        prompt = (
+            "You are an AI governance advisor for Indian municipal leaders. "
+            "Analyze this citizen complaint and produce a concise leadership brief.\n\n"
+            "Return strict JSON:\n"
+            "{\n"
+            '  "summary": "2-3 sentence executive summary of the issue",\n'
+            '  "severity": "critical"|"high"|"medium"|"low",\n'
+            '  "affected_population": "estimate of people affected",\n'
+            '  "root_cause": "likely root cause in one line",\n'
+            '  "recommended_action": "specific immediate action for leader",\n'
+            '  "escalation_risk": "what happens if not addressed in 48 hours",\n'
+            '  "similar_pattern": "does this match any common civic issue pattern",\n'
+            '  "citizen_sentiment": "brief read on citizen frustration level"\n'
+            "}\n"
+            "Rules: No markdown. JSON only. Be specific, actionable, concise.\n\n"
+            f"Category: {category}\n"
+            f"Ward: {ward}\n"
+            f"Title: {title or 'N/A'}\n"
+            f"Complaint: {description[:800]}\n"
+        )
+
+        parts = [{"text": prompt}]
+
+        try:
+            result = await self._call_gemini(parts, temperature=0, max_tokens=1024)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)[:200], "ai_model": self.MODEL_NAME}
+
+        if not result.get("ok"):
+            return {"success": False, "error": result.get("reason", "gemini_error"), "ai_model": self.MODEL_NAME}
+
+        parsed = result.get("parsed", {})
+        if not parsed:
+            return {"success": False, "error": "parse_failed", "ai_model": self.MODEL_NAME}
+
+        severity = str(parsed.get("severity", "medium")).strip().lower()
+        if severity not in {"critical", "high", "medium", "low"}:
+            severity = "medium"
+
+        return {
+            "success": True,
+            "summary": str(parsed.get("summary", "")).strip()[:400],
+            "severity": severity,
+            "affected_population": str(parsed.get("affected_population", "")).strip()[:100],
+            "root_cause": str(parsed.get("root_cause", "")).strip()[:200],
+            "recommended_action": str(parsed.get("recommended_action", "")).strip()[:300],
+            "escalation_risk": str(parsed.get("escalation_risk", "")).strip()[:300],
+            "similar_pattern": str(parsed.get("similar_pattern", "")).strip()[:200],
+            "citizen_sentiment": str(parsed.get("citizen_sentiment", "")).strip()[:200],
+            "ai_model": self.MODEL_NAME,
+        }
+
 
 # Singleton
 gemini_ai_service = GeminiAIService()

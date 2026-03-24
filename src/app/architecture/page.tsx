@@ -6,12 +6,12 @@ const layers = [
     color: '#3b82f6',
     desc: 'Multi-channel citizen interface',
     items: [
-      { name: 'WhatsApp Business API', icon: '💬', desc: 'Primary citizen communication channel' },
-      { name: 'Telegram Bot', icon: '🤖', desc: 'Alternative messaging platform' },
-      { name: 'IVR Voice', icon: '📞', desc: 'Toll-free voice complaint line' },
-      { name: 'Camera SDK', icon: '📸', desc: 'Photo-based issue detection' },
+      { name: 'WhatsApp Business API', icon: '', desc: 'Primary citizen communication channel' },
+      { name: 'Telegram Bot', icon: '', desc: 'Alternative messaging platform' },
+      { name: 'IVR Voice', icon: '', desc: 'Toll-free voice complaint line' },
+      { name: 'Camera SDK', icon: '', desc: 'Photo-based issue detection' },
       { name: 'Twitter/X API', icon: '𝕏', desc: 'Social media monitoring' },
-      { name: 'Facebook Graph', icon: '👤', desc: 'Social sentiment analysis' },
+      { name: 'Facebook Graph', icon: '', desc: 'Social sentiment analysis' },
     ],
   },
   {
@@ -19,12 +19,12 @@ const layers = [
     color: '#8b5cf6',
     desc: 'Intelligence and processing engine',
     items: [
-      { name: 'Whisper (ASR)', icon: '🎤', desc: 'Speech-to-text for 12+ Indian languages' },
-      { name: 'GPT-4o (NLP)', icon: '🧠', desc: 'Natural language understanding & extraction' },
-      { name: 'YOLOv8 (CV)', icon: '👁️', desc: 'Object detection in complaint photos' },
-      { name: 'BERT (Sentiment)', icon: '📊', desc: 'Social media sentiment classification' },
-      { name: 'LangChain', icon: '🔗', desc: 'LLM orchestration framework' },
-      { name: 'RAG Pipeline', icon: '📚', desc: 'Retrieval-augmented generation for responses' },
+      { name: 'Whisper (ASR)', icon: '', desc: 'Speech-to-text for 12+ Indian languages' },
+      { name: 'GPT-4o (NLP)', icon: '', desc: 'Natural language understanding & extraction' },
+      { name: 'YOLOv8 (CV)', icon: '️', desc: 'Object detection in complaint photos' },
+      { name: 'BERT (Sentiment)', icon: '', desc: 'Social media sentiment classification' },
+      { name: 'LangChain', icon: '', desc: 'LLM orchestration framework' },
+      { name: 'RAG Pipeline', icon: '', desc: 'Retrieval-augmented generation for responses' },
     ],
   },
   {
@@ -32,12 +32,12 @@ const layers = [
     color: '#10b981',
     desc: 'Core business logic and services',
     items: [
-      { name: 'FastAPI', icon: '⚡', desc: 'High-performance async API server' },
-      { name: 'Priority Engine', icon: '🎯', desc: 'AI scoring: Urgency × Impact × Recurrence × Sentiment' },
-      { name: 'Verification Service', icon: '✅', desc: 'GPS proof-of-work verification' },
-      { name: 'Notification Engine', icon: '📱', desc: 'SMS, push, and WhatsApp notifications' },
-      { name: 'Report Generator', icon: '📋', desc: 'AI-powered weekly report compilation' },
-      { name: 'Next.js Frontend', icon: '🖥️', desc: 'React-based dashboard & citizen portal' },
+      { name: 'FastAPI', icon: '', desc: 'High-performance async API server' },
+      { name: 'Priority Engine', icon: '', desc: 'AI scoring: Urgency × Impact × Recurrence × Sentiment' },
+      { name: 'Verification Service', icon: '', desc: 'GPS proof-of-work verification' },
+      { name: 'Notification Engine', icon: '', desc: 'SMS, push, and WhatsApp notifications' },
+      { name: 'Report Generator', icon: '', desc: 'AI-powered weekly report compilation' },
+      { name: 'Next.js Frontend', icon: '️', desc: 'React-based dashboard & citizen portal' },
     ],
   },
   {
@@ -45,11 +45,11 @@ const layers = [
     color: '#f59e0b',
     desc: 'Storage and data management',
     items: [
-      { name: 'PostgreSQL + PostGIS', icon: '🗄️', desc: 'Geospatial complaint data storage' },
-      { name: 'Redis', icon: '⚡', desc: 'Real-time caching & session management' },
-      { name: 'Elasticsearch', icon: '🔍', desc: 'Full-text search across complaints' },
-      { name: 'MinIO', icon: '📦', desc: 'S3-compatible object storage for photos' },
-      { name: 'TimescaleDB', icon: '📈', desc: 'Time-series data for trend analytics' },
+      { name: 'PostgreSQL + PostGIS', icon: '️', desc: 'Geospatial complaint data storage' },
+      { name: 'Redis', icon: '', desc: 'Real-time caching & session management' },
+      { name: 'Elasticsearch', icon: '', desc: 'Full-text search across complaints' },
+      { name: 'MinIO', icon: '', desc: 'S3-compatible object storage for photos' },
+      { name: 'TimescaleDB', icon: '', desc: 'Time-series data for trend analytics' },
     ],
   },
   {
@@ -57,20 +57,20 @@ const layers = [
     color: '#f43f5e',
     desc: 'Deployment and monitoring',
     items: [
-      { name: 'AWS / Azure India', icon: '☁️', desc: 'Data residency compliant cloud hosting' },
-      { name: 'Docker + K8s', icon: '🐳', desc: 'Containerized microservice deployment' },
-      { name: 'Nginx', icon: '🌐', desc: 'Reverse proxy and load balancing' },
-      { name: 'Prometheus + Grafana', icon: '📊', desc: 'Real-time monitoring and alerting' },
-      { name: 'GitHub Actions', icon: '🔄', desc: 'CI/CD pipeline automation' },
+      { name: 'AWS / Azure India', icon: '️', desc: 'Data residency compliant cloud hosting' },
+      { name: 'Docker + K8s', icon: '', desc: 'Containerized microservice deployment' },
+      { name: 'Nginx', icon: '', desc: 'Reverse proxy and load balancing' },
+      { name: 'Prometheus + Grafana', icon: '', desc: 'Real-time monitoring and alerting' },
+      { name: 'GitHub Actions', icon: '', desc: 'CI/CD pipeline automation' },
     ],
   },
 ];
 
 const compliance = [
-  { icon: '🔒', title: 'End-to-End Encrypted', desc: 'All data encrypted in transit and at rest' },
-  { icon: '📜', title: 'GDPR + IT Act Compliant', desc: 'Meets Indian and international privacy standards' },
-  { icon: '🇮🇳', title: 'Data Residency: India', desc: 'All citizen data stays within Indian borders' },
-  { icon: '🏅', title: 'ISO 27001 Ready', desc: 'Information security management certified' },
+  { icon: '', title: 'End-to-End Encrypted', desc: 'All data encrypted in transit and at rest' },
+  { icon: '', title: 'GDPR + IT Act Compliant', desc: 'Meets Indian and international privacy standards' },
+  { icon: '', title: 'Data Residency: India', desc: 'All citizen data stays within Indian borders' },
+  { icon: '', title: 'ISO 27001 Ready', desc: 'Information security management certified' },
 ];
 
 export default function ArchitecturePage() {
@@ -149,7 +149,7 @@ export default function ArchitecturePage() {
                   <h4 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 8 }}>{p.title}</h4>
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 12 }}>{p.desc}</p>
                   <div style={{ background: `${p.color}15`, padding: '8px 12px', borderRadius: 8, border: `1px solid ${p.color}33` }}>
-                    <span style={{ fontSize: '0.75rem', color: p.color, fontWeight: 600 }}>🎯 {p.metric}</span>
+                    <span style={{ fontSize: '0.75rem', color: p.color, fontWeight: 600 }}> {p.metric}</span>
                   </div>
                 </div>
               ))}

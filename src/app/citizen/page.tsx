@@ -120,6 +120,7 @@ type BrowserSpeechRecognition = {
   continuous: boolean;
   start: () => void;
   stop: () => void;
+  abort: () => void;
   onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
   onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
@@ -581,7 +582,7 @@ export default function CitizenPortal() {
     }
   };
 
-  const startLiveDictation = () => {
+  const startLiveDictation = async () => {
     if (typeof window === 'undefined') return;
     const w = window as Window & {
       webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
@@ -589,42 +590,88 @@ export default function CitizenPortal() {
     };
     const SpeechRecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) {
-      setVoiceTranscribeError('Live dictation is not supported in this browser.');
+      setVoiceTranscribeError('Live dictation is not supported in this browser. Use Chrome or Edge.');
       return;
     }
 
     setVoiceTranscribeError('');
-    const recognition = new SpeechRecognitionCtor();
-    recognition.lang = 'en-IN';
-    recognition.interimResults = true;
-    recognition.continuous = true;
 
-    recognition.onresult = (event) => {
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i += 1) {
-        transcript += `${event.results[i][0].transcript} `;
-      }
-      const normalized = transcript.trim();
-      setVoiceTranscript(normalized);
-      setVoiceLanguage('Live Mic');
+    // Explicitly request microphone permission first — this is required on
+    // deployed HTTPS sites where the browser may not implicitly grant access.
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Release the stream immediately — we only need the permission grant.
+      stream.getTracks().forEach(t => t.stop());
+    } catch (micErr: unknown) {
+      const msg = micErr instanceof Error ? micErr.message : String(micErr);
+      setVoiceTranscribeError(
+        `Microphone access denied. Please allow microphone permission in your browser settings and try again. (${msg})`
+      );
+      return;
+    }
+
+    const maxRetries = 3;
+    let attempt = 0;
+
+    const tryStart = () => {
+      attempt += 1;
+      const recognition = new SpeechRecognitionCtor();
+      recognition.lang = 'en-IN';
+      recognition.interimResults = true;
+      recognition.continuous = true;
+
+      recognition.onresult = (event) => {
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i += 1) {
+          transcript += `${event.results[i][0].transcript} `;
+        }
+        const normalized = transcript.trim();
+        setVoiceTranscript(normalized);
+        setVoiceLanguage('Live Mic');
+      };
+
+      recognition.onerror = (event) => {
+        const err = event?.error || 'unknown';
+
+        // The 'network' error is often transient — retry automatically
+        if (err === 'network' && attempt < maxRetries) {
+          console.warn(`[SpeechRecognition] network error on attempt ${attempt}/${maxRetries}, retrying...`);
+          recognition.abort();
+          setTimeout(tryStart, 500);
+          return;
+        }
+
+        if (err === 'network') {
+          setVoiceTranscribeError(
+            'Live mic could not connect to speech servers. This can happen on some networks/browsers. ' +
+            'Try: 1) Refresh the page 2) Use Chrome or Edge 3) Check that your network allows Google Speech services. ' +
+            'Alternatively, use the "Upload Audio" option to transcribe a recorded file.'
+          );
+        } else if (err === 'not-allowed') {
+          setVoiceTranscribeError(
+            'Microphone access was denied. Please allow microphone permission in your browser settings (click the lock icon in the address bar).'
+          );
+        } else {
+          setVoiceTranscribeError(`Live transcription error: ${err}`);
+        }
+        setVoiceListening(false);
+        recognitionRef.current = null;
+      };
+
+      recognition.onend = () => {
+        setVoiceListening(false);
+        if (!description.trim() && voiceTranscript.trim()) {
+          setDescription(voiceTranscript.trim());
+        }
+        recognitionRef.current = null;
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setVoiceListening(true);
     };
 
-    recognition.onerror = (event) => {
-      const err = event?.error || 'unknown';
-      setVoiceTranscribeError(`Live transcription error: ${err}`);
-    };
-
-    recognition.onend = () => {
-      setVoiceListening(false);
-      if (!description.trim() && voiceTranscript.trim()) {
-        setDescription(voiceTranscript.trim());
-      }
-      recognitionRef.current = null;
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-    setVoiceListening(true);
+    tryStart();
   };
 
   const stopLiveDictation = () => {
@@ -902,7 +949,7 @@ export default function CitizenPortal() {
               border: tab === 'file' ? '1px solid var(--accent-blue)' : '1px solid var(--border-subtle)',
               background: tab === 'file' ? 'rgba(59,130,246,0.1)' : 'var(--bg-glass)',
             }}>
-              <div style={{ fontSize: '1.5rem', marginBottom: 4 }}>📝</div>
+              <div style={{ fontSize: '1.5rem', marginBottom: 4 }}></div>
               <div style={{ fontWeight: 700 }}>File Complaint</div>
             </button>
             <button onClick={() => setTab('track')} className="glass-card" style={{
@@ -910,7 +957,7 @@ export default function CitizenPortal() {
               border: tab === 'track' ? '1px solid var(--accent-blue)' : '1px solid var(--border-subtle)',
               background: tab === 'track' ? 'rgba(59,130,246,0.1)' : 'var(--bg-glass)',
             }}>
-              <div style={{ fontSize: '1.5rem', marginBottom: 4 }}>🔍</div>
+              <div style={{ fontSize: '1.5rem', marginBottom: 4 }}></div>
               <div style={{ fontWeight: 700 }}>Track Complaint</div>
             </button>
           </div>
@@ -978,11 +1025,11 @@ export default function CitizenPortal() {
                       </div>
 
                       <button type="submit" className="btn btn-primary" disabled={authLoading} style={{ width: '100%', justifyContent: 'center' }}>
-                        {authLoading ? '⏳ Authenticating...' : authMode === 'signup' ? '✅ Sign Up & Continue' : '🔐 Login'}
+                        {authLoading ? '⏳ Authenticating...' : authMode === 'signup' ? ' Sign Up & Continue' : ' Login'}
                       </button>
                     </form>
 
-                    {authError && <div style={{ marginTop: 12, color: '#dc2626', fontSize: '0.85rem' }}>❌ {authError}</div>}
+                    {authError && <div style={{ marginTop: 12, color: '#dc2626', fontSize: '0.85rem' }}> {authError}</div>}
                     <div style={{ marginTop: 12, fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
                       Complaint filing is allowed only for authenticated citizens.
                     </div>
@@ -1009,9 +1056,9 @@ export default function CitizenPortal() {
 
                     <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
                       {([
-                        { key: 'text' as const, icon: '💬', label: 'Text' },
-                        { key: 'voice' as const, icon: '🎤', label: 'Voice' },
-                        { key: 'photo' as const, icon: '📸', label: 'Photo' },
+                        { key: 'text' as const, icon: '', label: 'Text' },
+                        { key: 'voice' as const, icon: '', label: 'Voice' },
+                        { key: 'photo' as const, icon: '', label: 'Photo' },
                       ]).map(mode => (
                         <button
                           key={mode.key}
@@ -1120,7 +1167,7 @@ export default function CitizenPortal() {
                                 }
                               }}
                             >
-                              {voiceListening ? '⏹️ Stop Live Mic' : '🎙️ Start Live Mic'}
+                              {voiceListening ? '⏹️ Stop Live Mic' : '️ Start Live Mic'}
                             </button>
 
                             <button
@@ -1145,7 +1192,7 @@ export default function CitizenPortal() {
 
                           {voiceTranscribeError && (
                             <div style={{ marginTop: 8, color: '#dc2626', fontSize: '0.78rem' }}>
-                              ❌ {voiceTranscribeError}
+                               {voiceTranscribeError}
                             </div>
                           )}
 
@@ -1190,7 +1237,7 @@ export default function CitizenPortal() {
                               disabled={!voiceFile || voiceFileProcessing || submitting || inputProcessing}
                               style={{ marginTop: 10 }}
                             >
-                              {voiceFileProcessing ? '⏳ Transcribing with Whisper STT...' : '🧠 Extract with Whisper STT'}
+                              {voiceFileProcessing ? '⏳ Transcribing with Whisper STT...' : ' Extract with Whisper STT'}
                             </button>
                             {voiceFileMessage && (
                               <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
@@ -1299,7 +1346,7 @@ export default function CitizenPortal() {
                         width: '100%', justifyContent: 'center', marginTop: 8,
                         opacity: submitting || inputProcessing ? 0.7 : 1,
                       }}>
-                        {submitting || inputProcessing ? '⏳ Processing AI + Filing...' : '🚀 Submit Complaint'}
+                        {submitting || inputProcessing ? '⏳ Processing AI + Filing...' : ' Submit Complaint'}
                       </button>
                     </form>
 
@@ -1449,8 +1496,8 @@ export default function CitizenPortal() {
                 </div>
 
                 <div className="glass-card" style={{ padding: 24 }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>📱 Multiple Ways to Report</h3>
-                  {['WhatsApp: +91 9430862005', 'SMS: COMPLAINT to 56789', 'IVR: 1800-XXX-XXXX (toll-free)', 'Web Portal: this page'].map(ch => (
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}> Multiple Ways to Report</h3>
+                  {['WhatsApp: +14155238886', 'Web Portal: janshakti-ai.tech'].map(ch => (
                     <div key={ch} style={{ padding: '8px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{ch}</div>
                   ))}
                 </div>
@@ -1461,7 +1508,7 @@ export default function CitizenPortal() {
           {tab === 'track' && (
             <div style={{ maxWidth: 700, margin: '0 auto' }}>
               <div className="glass-card" style={{ padding: 32, marginBottom: 24 }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16 }}>🔍 Track Your Complaint</h3>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 16 }}> Track Your Complaint</h3>
                 <div style={{ display: 'flex', gap: 12 }}>
                   <input className="form-input" value={trackingId} onChange={e => setTrackingId(e.target.value)}
                     placeholder="Enter Ticket ID (e.g., TKT-A1B2C3)" onKeyDown={e => e.key === 'Enter' && handleTrack()} />
@@ -1469,7 +1516,7 @@ export default function CitizenPortal() {
                 </div>
 
                 {trackError && (
-                  <div style={{ marginTop: 12, color: '#dc2626', fontSize: '0.85rem' }}>❌ {trackError}</div>
+                  <div style={{ marginTop: 12, color: '#dc2626', fontSize: '0.85rem' }}> {trackError}</div>
                 )}
 
                 {trackedResult && (
@@ -1585,7 +1632,7 @@ export default function CitizenPortal() {
                               boxShadow: isActive ? `0 0 16px ${config.color}44` : 'none',
                               color: isComplete ? 'white' : 'var(--text-tertiary)',
                             }}>
-                              {isComplete ? '✓' : (i + 1)}
+                              {isComplete ? '' : (i + 1)}
                             </div>
                             <div style={{ fontSize: '0.7rem', fontWeight: 600, color: isComplete ? config.color : 'var(--text-tertiary)' }}>{config.label}</div>
                           </div>
@@ -1637,7 +1684,7 @@ export default function CitizenPortal() {
               {authUser && (
                 <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
                   <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 14 }}>
-                    👤 My Profile Updates
+                     My Profile Updates
                   </h3>
 
                   {myComplaints.length === 0 ? (
@@ -1663,7 +1710,7 @@ export default function CitizenPortal() {
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ fontSize: '0.78rem', color: solved ? '#16a34a' : (sConfig?.color || '#64748b'), fontWeight: 700 }}>
-                                {solved ? 'Solved ✓' : (sConfig?.label || c.status)}
+                                {solved ? 'Solved ' : (sConfig?.label || c.status)}
                               </div>
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>
                                 {c.resolved_at ? `Resolved ${new Date(c.resolved_at).toLocaleDateString('en-IN')}` : (c.created_at ? `Filed ${new Date(c.created_at).toLocaleDateString('en-IN')}` : '')}

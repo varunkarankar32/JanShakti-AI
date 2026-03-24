@@ -2,7 +2,7 @@
 Complaints Router — CRUD and workflow operations for citizen complaints.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 import json
@@ -310,7 +310,7 @@ def _local_cluster_count(
         .filter(Complaint.ward == ward)
         .filter(Complaint.category == category)
         .filter(Complaint.status != ComplaintStatus.RESOLVED)
-        .filter(Complaint.created_at >= datetime.now() - timedelta(days=30))
+        .filter(Complaint.created_at >= datetime.now(timezone.utc) - timedelta(days=30))
         .filter(Complaint.latitude.isnot(None), Complaint.longitude.isnot(None))
         .all()
     )
@@ -555,7 +555,8 @@ def _unresponded_hours(complaint: Complaint) -> float:
         return 0.0
     if not complaint.created_at:
         return 0.0
-    return max(0.0, (datetime.now() - complaint.created_at).total_seconds() / 3600.0)
+    created = complaint.created_at if complaint.created_at.tzinfo else complaint.created_at.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - created).total_seconds() / 3600.0)
 
 
 def _effective_priority_snapshot(complaint: Complaint):
@@ -669,7 +670,7 @@ def _background_enrich_complaint_media(complaint_id: int):
             .filter(Complaint.ward == complaint.ward)
             .filter(Complaint.category == category)
             .filter(Complaint.status != ComplaintStatus.RESOLVED)
-            .filter(Complaint.created_at >= datetime.now() - timedelta(days=30))
+            .filter(Complaint.created_at >= datetime.now(timezone.utc) - timedelta(days=30))
             .count()
         )
         local_cluster_count = _local_cluster_count(
@@ -708,13 +709,78 @@ def _background_enrich_complaint_media(complaint_id: int):
         complaint.ai_explanation = priority_result.get("explanation")
         complaint.ai_model_version = priority_result.get("model_version")
 
+        # ── Gemini 2.5 Flash: AI priority scoring + risk assessment + leader brief ──
+        try:
+            import asyncio
+
+            # 1. Gemini priority scoring (enriches Qwen score)
+            gemini_score = asyncio.run(
+                gemini_ai_service.score_priority(
+                    text=scoring_text,
+                    category=category,
+                    ward=complaint.ward,
+                )
+            )
+            if gemini_score.get("used"):
+                g_urgency = gemini_score["urgency"]
+                g_impact = gemini_score["impact"]
+                g_sentiment = gemini_score["sentiment_score"]
+                g_ai_score = round(g_urgency * 0.4 + g_impact * 0.35 + g_sentiment * 0.15 + (complaint.recurrence_score or 0) * 0.1, 1)
+                # Use Gemini score if higher (more accurate AI > heuristic)
+                if g_ai_score > (complaint.ai_score or 0):
+                    complaint.ai_score = g_ai_score
+                    complaint.urgency_score = g_urgency
+                    complaint.impact_score = g_impact
+                    complaint.sentiment_score = g_sentiment
+                    # Re-determine priority level from Gemini score
+                    if g_ai_score >= 80:
+                        complaint.priority = PriorityLevel.P0
+                    elif g_ai_score >= 60:
+                        complaint.priority = PriorityLevel.P1
+                    elif g_ai_score >= 35:
+                        complaint.priority = PriorityLevel.P2
+                    else:
+                        complaint.priority = PriorityLevel.P3
+                    complaint.ai_model_version = f"Gemini-2.5-Flash + {complaint.ai_model_version or 'Qwen'}"
+                    complaint.ai_explanation = gemini_score.get("reasoning") or complaint.ai_explanation
+
+            # 2. Gemini risk assessment
+            risk_result = asyncio.run(
+                gemini_ai_service.assess_risk(
+                    description=scoring_text,
+                    category=category,
+                    ward=complaint.ward,
+                    title=complaint.title,
+                )
+            )
+            if risk_result.get("success"):
+                complaint.ai_risk_score = risk_result.get("risk_score")
+                complaint.ai_risk_level = risk_result.get("risk_level")
+                complaint.ai_risk_factors = json.dumps(risk_result.get("risk_factors", []))
+                complaint.ai_risk_reasoning = risk_result.get("reasoning")
+
+            # 3. Gemini leader brief
+            leader_brief = asyncio.run(
+                gemini_ai_service.generate_leader_brief(
+                    description=scoring_text,
+                    category=category,
+                    ward=complaint.ward,
+                    title=complaint.title,
+                )
+            )
+            if leader_brief.get("success"):
+                complaint.ai_leader_brief = json.dumps(leader_brief)
+
+        except Exception:
+            pass  # Gemini enrichment is best-effort; Qwen result already saved above
+
         _log_activity(
             db,
             complaint,
             actor_role="system",
             actor_name="AI Engine",
             action="background_ai_enrichment_completed",
-            note=f"score={complaint.ai_score}; priority={complaint.priority.value if complaint.priority else 'P3'}",
+            note=f"score={complaint.ai_score}; priority={complaint.priority.value if complaint.priority else 'P3'}; risk={complaint.ai_risk_level or 'N/A'}",
         )
         db.commit()
     except Exception:
@@ -746,16 +812,16 @@ def create_complaint(
     refined_description = extracted["description"]
     category = complaint.category if complaint.category else extracted["category"]
     ai_meta = extracted.get("ai", {})
-    defer_media_ai = bool(complaint.image_path or complaint.audio_path)
+    has_media = bool(complaint.image_path or complaint.audio_path)
 
     media_context_notes = []
 
     # Re-read citizen media from server storage so image/audio understanding is always
     # available for scoring, even if frontend submitted only a short placeholder text.
     image_bytes, image_name = (None, None)
-    if not defer_media_ai:
+    if not has_media:
         image_bytes, image_name = _read_media_from_path(complaint.image_path)
-    if image_bytes and not defer_media_ai:
+    if image_bytes and not has_media:
         try:
             image_extracted = complaint_extraction_service.extract_from_image(
                 image_bytes=image_bytes,
@@ -786,9 +852,9 @@ def create_complaint(
             media_context_notes.append(f"Image analysis unavailable: {str(exc)[:120]}")
 
     audio_bytes, audio_name = (None, None)
-    if not defer_media_ai:
+    if not has_media:
         audio_bytes, audio_name = _read_media_from_path(complaint.audio_path)
-    if audio_bytes and not defer_media_ai:
+    if audio_bytes and not has_media:
         try:
             ext = Path(audio_name or "voice.wav").suffix.lower().lstrip(".") or "wav"
             voice_extracted = complaint_extraction_service.extract_from_voice(
@@ -819,7 +885,7 @@ def create_complaint(
         .filter(Complaint.ward == complaint.ward)
         .filter(Complaint.category == category)
         .filter(Complaint.status != ComplaintStatus.RESOLVED)
-        .filter(Complaint.created_at >= datetime.now() - timedelta(days=30))
+        .filter(Complaint.created_at >= datetime.now(timezone.utc) - timedelta(days=30))
         .count()
     )
     local_cluster_count = _local_cluster_count(
@@ -830,6 +896,7 @@ def create_complaint(
         longitude=complaint.longitude,
     )
 
+    # Always use fast heuristic for instant response; Qwen AI re-scores asynchronously
     priority_result = priority_engine.calculate_score(
         text=scoring_text,
         category=category,
@@ -837,12 +904,11 @@ def create_complaint(
         recurrence_count=recurrence_count,
         local_cluster_count=local_cluster_count,
         social_mentions=0,
-        enable_qwen=not defer_media_ai,
+        enable_qwen=False,
     )
 
-    if defer_media_ai:
-        ai_meta["background_ai_processing"] = "queued"
-        ai_meta["background_ai_processing_note"] = "Media understanding and Qwen re-scoring in progress"
+    ai_meta["background_ai_processing"] = "queued"
+    ai_meta["background_ai_processing_note"] = "AI Qwen re-scoring in progress"
 
     priority_level = PriorityLevel(priority_result["priority"])
     input_mode = InputMode(complaint.input_mode) if complaint.input_mode in [e.value for e in InputMode] else InputMode.TEXT
@@ -895,17 +961,17 @@ def create_complaint(
     db.commit()
     db.refresh(db_complaint)
 
-    if defer_media_ai:
-        _log_activity(
-            db,
-            db_complaint,
-            actor_role="system",
-            actor_name="AI Engine",
-            action="background_ai_enrichment_queued",
-            note="Complaint registered instantly; media/Qwen enrichment queued.",
-        )
-        db.commit()
-        background_tasks.add_task(_background_enrich_complaint_media, db_complaint.id)
+    # Always queue background AI enrichment (Qwen re-scoring + media processing if applicable)
+    _log_activity(
+        db,
+        db_complaint,
+        actor_role="system",
+        actor_name="AI Engine",
+        action="background_ai_enrichment_queued",
+        note="Complaint registered instantly; AI Qwen re-scoring queued.",
+    )
+    db.commit()
+    background_tasks.add_task(_background_enrich_complaint_media, db_complaint.id)
 
     return {
         "id": db_complaint.id,
@@ -1133,7 +1199,7 @@ def list_complaints(
         query = query.filter(Complaint.status == status)
 
     total = query.count()
-    complaints = query.order_by(desc(Complaint.created_at)).offset(offset).limit(limit).all()
+    complaints = query.order_by(desc(Complaint.ai_score), desc(Complaint.created_at)).offset(offset).limit(limit).all()
 
     return {
         "total": total,
@@ -1178,6 +1244,12 @@ def list_complaints(
                 "created_at": c.created_at.isoformat() if c.created_at else None,
                 "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
                 "rating": c.rating,
+                # Gemini AI Analysis (for leader dashboard)
+                "ai_risk_score": c.ai_risk_score,
+                "ai_risk_level": c.ai_risk_level,
+                "ai_risk_factors": json.loads(c.ai_risk_factors) if c.ai_risk_factors else None,
+                "ai_risk_reasoning": c.ai_risk_reasoning,
+                "ai_leader_brief": json.loads(c.ai_leader_brief) if c.ai_leader_brief else None,
             })(_effective_priority_snapshot(c))
             for c in complaints
         ],
@@ -1421,6 +1493,12 @@ def get_complaint(ticket_id: str, db: Session = Depends(get_db)):
         "resolved_at": complaint.resolved_at.isoformat() if complaint.resolved_at else None,
         "rating": complaint.rating,
         "feedback": complaint.feedback,
+        # Gemini AI Analysis (for leader dashboard)
+        "ai_risk_score": complaint.ai_risk_score,
+        "ai_risk_level": complaint.ai_risk_level,
+        "ai_risk_factors": json.loads(complaint.ai_risk_factors) if complaint.ai_risk_factors else None,
+        "ai_risk_reasoning": complaint.ai_risk_reasoning,
+        "ai_leader_brief": json.loads(complaint.ai_leader_brief) if complaint.ai_leader_brief else None,
         "activity": _activity_payload(db, complaint.id),
     }
 
@@ -1435,7 +1513,7 @@ def update_complaint(ticket_id: str, update: ComplaintUpdate, db: Session = Depe
     if update.status:
         complaint.status = ComplaintStatus(update.status)
         if update.status == "resolved":
-            complaint.resolved_at = datetime.now()
+            complaint.resolved_at = datetime.now(timezone.utc)
     if update.assigned_to:
         complaint.assigned_to = update.assigned_to
         if complaint.status == ComplaintStatus.OPEN:
@@ -1756,7 +1834,7 @@ def leader_resolve_complaint(
         raise HTTPException(status_code=400, detail="Complaint must be in assigned/in-progress/verification stage")
 
     complaint.status = ComplaintStatus.RESOLVED
-    complaint.resolved_at = datetime.now()
+    complaint.resolved_at = datetime.now(timezone.utc)
     complaint.verification_status = "verified"
     complaint.leader_note = req.resolution_note
     if req.citizen_update:
@@ -1999,7 +2077,7 @@ def incident_summary(
 ):
     _apply_starvation_escalation(db)
 
-    since = datetime.now() - timedelta(hours=max(24, min(window_hours, 24 * 30)))
+    since = datetime.now(timezone.utc) - timedelta(hours=max(24, min(window_hours, 24 * 30)))
     complaints = (
         db.query(Complaint)
         .filter(Complaint.created_at >= since)

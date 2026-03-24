@@ -62,6 +62,7 @@ class Complaint(Base):
     ai_risk_level = Column(String, nullable=True)       # Critical/High/Medium/Low
     ai_risk_factors = Column(Text, nullable=True)       # JSON array of risk factors
     ai_risk_reasoning = Column(Text, nullable=True)     # AI reasoning text
+    ai_leader_brief = Column(Text, nullable=True)        # JSON: Gemini leader analysis brief
 
     # Status
     status = Column(SqlEnum(ComplaintStatus), default=ComplaintStatus.OPEN)

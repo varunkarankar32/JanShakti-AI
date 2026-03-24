@@ -48,9 +48,9 @@ export default function MultiModalPage() {
           {/* Tab Selector */}
           <div style={{ display: 'flex', gap: 12, marginBottom: 32 }}>
             {([
-              { key: 'voice' as const, icon: '🎤', label: 'Voice Input', tech: 'Whisper ASR + GPT-4o' },
-              { key: 'photo' as const, icon: '📸', label: 'Photo Input', tech: 'YOLOv8 Detection' },
-              { key: 'text' as const, icon: '💬', label: 'Text Input', tech: 'LLM Classification' },
+              { key: 'voice' as const, icon: '', label: 'Voice Input', tech: 'Whisper ASR + GPT-4o' },
+              { key: 'photo' as const, icon: '', label: 'Photo Input', tech: 'YOLOv8 Detection' },
+              { key: 'text' as const, icon: '', label: 'Text Input', tech: 'LLM Classification' },
             ]).map(tab => (
               <button
                 key={tab.key}
@@ -73,14 +73,14 @@ export default function MultiModalPage() {
           <div className="glass-card" style={{ padding: 40 }}>
             {activeTab === 'voice' && (
               <div>
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>🎤 Voice in Any Language</h3>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}> Voice in Any Language</h3>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: 24 }}>
                   Sunita doesn&apos;t type — she sends a 30-second voice note in Bhojpuri. Whisper ASR transcribes it. GPT-4o extracts issue type, location, urgency — all in under 3 seconds.
                 </p>
 
                 <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 20, marginBottom: 20, border: '1px solid var(--border-subtle)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--gradient-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎤</div>
+                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--gradient-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}></div>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Voice Note — {voiceDemo.language}</div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>30 seconds · WhatsApp</div>
@@ -92,7 +92,7 @@ export default function MultiModalPage() {
                 </div>
 
                 <button onClick={handleDemo} className="btn btn-primary" style={{ marginBottom: 20 }}>
-                  {processing ? '⚡ Processing with Whisper + GPT-4o...' : '▶ Simulate AI Processing'}
+                  {processing ? ' Processing with Whisper + GPT-4o...' : '▶ Simulate AI Processing'}
                 </button>
 
                 {processing && (
@@ -108,7 +108,7 @@ export default function MultiModalPage() {
 
                 {showResult && (
                   <div style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 12, padding: 20, animation: 'fadeInUp 0.5s ease' }}>
-                    <div style={{ fontWeight: 700, color: '#22c55e', marginBottom: 12, fontSize: '0.9rem' }}>✅ AI Extraction Complete — 2.8 seconds</div>
+                    <div style={{ fontWeight: 700, color: '#22c55e', marginBottom: 12, fontSize: '0.9rem' }}> AI Extraction Complete — 2.8 seconds</div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
                       {Object.entries(voiceDemo.output).map(([k, v]) => (
                         <div key={k} style={{ background: 'var(--bg-tertiary)', padding: '10px 14px', borderRadius: 8 }}>
@@ -124,7 +124,7 @@ export default function MultiModalPage() {
 
             {activeTab === 'photo' && (
               <div>
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>📸 Photo with Smart Detection</h3>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}> Photo with Smart Detection</h3>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: 24 }}>
                   Raju photographs the broken road. YOLOv8 detects: pothole (category), severe (grade), GPS auto-captured. No form filling needed — the photo is the complaint.
                 </p>
@@ -132,7 +132,7 @@ export default function MultiModalPage() {
                 <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 20, marginBottom: 20, border: '1px solid var(--border-subtle)', position: 'relative', minHeight: 200 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160, background: 'var(--bg-primary)', borderRadius: 8, border: '2px dashed var(--border-accent)', position: 'relative' }}>
                     <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '3rem', marginBottom: 8 }}>📸</div>
+                      <div style={{ fontSize: '3rem', marginBottom: 8 }}></div>
                       <div style={{ color: 'var(--text-tertiary)', fontSize: '0.9rem' }}>Simulated Road Damage Photo</div>
                       <div style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem', marginTop: 4 }}>GPS: 26.4499°N, 80.3319°E</div>
                     </div>
@@ -153,12 +153,12 @@ export default function MultiModalPage() {
                 </div>
 
                 <button onClick={handleDemo} className="btn btn-primary" style={{ marginBottom: 20 }}>
-                  {processing ? '⚡ Running YOLOv8 Detection...' : '▶ Simulate AI Detection'}
+                  {processing ? ' Running YOLOv8 Detection...' : '▶ Simulate AI Detection'}
                 </button>
 
                 {showResult && (
                   <div style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 12, padding: 20, animation: 'fadeInUp 0.5s ease' }}>
-                    <div style={{ fontWeight: 700, color: '#22c55e', marginBottom: 12, fontSize: '0.9rem' }}>✅ YOLOv8 Detection Complete</div>
+                    <div style={{ fontWeight: 700, color: '#22c55e', marginBottom: 12, fontSize: '0.9rem' }}> YOLOv8 Detection Complete</div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
                       {Object.entries(photoDemo.output).map(([k, v]) => (
                         <div key={k} style={{ background: 'var(--bg-tertiary)', padding: '10px 14px', borderRadius: 8 }}>
@@ -174,14 +174,14 @@ export default function MultiModalPage() {
 
             {activeTab === 'text' && (
               <div>
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}>💬 WhatsApp / SMS Text</h3>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 8 }}> WhatsApp / SMS Text</h3>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: 24 }}>
                   Priya types a quick WhatsApp message. LLM classifies the issue, auto-fills location, and creates a tracked ticket instantly.
                 </p>
 
                 <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 20, marginBottom: 20, border: '1px solid var(--border-subtle)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'linear-gradient(135deg, #25D366, #128C7E)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>💬</div>
+                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'linear-gradient(135deg, #25D366, #128C7E)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}></div>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>WhatsApp Message</div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>To: Ward Helpline</div>
@@ -193,12 +193,12 @@ export default function MultiModalPage() {
                 </div>
 
                 <button onClick={handleDemo} className="btn btn-primary" style={{ marginBottom: 20 }}>
-                  {processing ? '⚡ LLM Classifying...' : '▶ Simulate AI Classification'}
+                  {processing ? ' LLM Classifying...' : '▶ Simulate AI Classification'}
                 </button>
 
                 {showResult && (
                   <div style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 12, padding: 20, animation: 'fadeInUp 0.5s ease' }}>
-                    <div style={{ fontWeight: 700, color: '#22c55e', marginBottom: 12, fontSize: '0.9rem' }}>✅ Ticket Created — #{textDemo.output.ticket}</div>
+                    <div style={{ fontWeight: 700, color: '#22c55e', marginBottom: 12, fontSize: '0.9rem' }}> Ticket Created — #{textDemo.output.ticket}</div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
                       {Object.entries(textDemo.output).map(([k, v]) => (
                         <div key={k} style={{ background: 'var(--bg-tertiary)', padding: '10px 14px', borderRadius: 8 }}>

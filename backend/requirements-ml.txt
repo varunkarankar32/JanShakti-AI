@@ -1,0 +1,17 @@
+# Optional heavy ML dependencies for local/dev or GPU-enabled deployments
+# Install manually when needed:
+# pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r backend/requirements-ml.txt
+
+# PyTorch stack (CPU)
+torch==2.5.1
+torchvision==0.20.1
+torchaudio==2.5.1
+
+# Advanced NLP stack
+transformers==4.45.0
+scikit-learn==1.6.1
+pandas==2.2.3
+
+# Advanced CV + STT
+ultralytics==8.3.0
+openai-whisper==20240930
