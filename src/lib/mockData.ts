@@ -186,7 +186,7 @@ export const mockSentimentData: SentimentData[] = [
 
 export const mockSocialPosts: SocialPost[] = [
   {
-    id: 'SP-1', platform: 'Twitter', content: 'Brown water coming from taps in Sector 8 since morning! @WaterDept please help! 💧',
+    id: 'SP-1', platform: 'Twitter', content: 'Brown water coming from taps in Sector 8 since morning! @WaterDept please help! ',
     sentiment: 'negative', location: 'Ward 8', timestamp: '2026-03-13T07:15:00', engagement: 234, isMisinfo: false,
   },
   {
@@ -194,7 +194,7 @@ export const mockSocialPosts: SocialPost[] = [
     sentiment: 'negative', location: 'Ward 3', timestamp: '2026-03-13T08:30:00', engagement: 12500, isMisinfo: true,
   },
   {
-    id: 'SP-3', platform: 'Facebook', content: 'Finally the garbage trucks deployed in Ward 5! Thank you ward officer 🙏 Clean streets after months!',
+    id: 'SP-3', platform: 'Facebook', content: 'Finally the garbage trucks deployed in Ward 5! Thank you ward officer  Clean streets after months!',
     sentiment: 'positive', location: 'Ward 5', timestamp: '2026-03-13T09:00:00', engagement: 567, isMisinfo: false,
   },
   {
@@ -233,11 +233,11 @@ export const mockWardHeatData = [
 ];
 
 export const mockAlerts = [
-  { id: 1, type: 'critical', message: 'Gas leak reported near Govt. School, Ward 12', time: '2 min ago', icon: '🚨' },
-  { id: 2, type: 'warning', message: 'Complaint spike detected in Ward 3 (+200%)', time: '15 min ago', icon: '⚠️' },
-  { id: 3, type: 'info', message: 'Negative sentiment surging in Ward 7 social media', time: '30 min ago', icon: '📊' },
-  { id: 4, type: 'critical', message: 'P0 issue overdue: Water contamination Ward 8', time: '1 hour ago', icon: '🚨' },
-  { id: 5, type: 'success', message: 'Ward 5 satisfaction jumped to 71% (+43% this week)', time: '2 hours ago', icon: '✅' },
+  { id: 1, type: 'critical', message: 'Gas leak reported near Govt. School, Ward 12', time: '2 min ago', icon: '' },
+  { id: 2, type: 'warning', message: 'Complaint spike detected in Ward 3 (+200%)', time: '15 min ago', icon: '️' },
+  { id: 3, type: 'info', message: 'Negative sentiment surging in Ward 7 social media', time: '30 min ago', icon: '' },
+  { id: 4, type: 'critical', message: 'P0 issue overdue: Water contamination Ward 8', time: '1 hour ago', icon: '' },
+  { id: 5, type: 'success', message: 'Ward 5 satisfaction jumped to 71% (+43% this week)', time: '2 hours ago', icon: '' },
 ];
 
 export const mockActionQueue = [

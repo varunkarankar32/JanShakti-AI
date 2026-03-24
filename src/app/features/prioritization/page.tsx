@@ -11,10 +11,10 @@ const priorities = [
 ];
 
 const factors = [
-  { name: 'Urgency', desc: 'Health/safety risk? Time-sensitive?', icon: '⚡', weight: 40 },
-  { name: 'Impact', desc: 'How many people affected? Infrastructure?', icon: '👥', weight: 30 },
-  { name: 'Recurrence', desc: 'Same issue reported multiple times?', icon: '🔄', weight: 20 },
-  { name: 'Sentiment', desc: 'Citizens angry on social media?', icon: '😤', weight: 10 },
+  { name: 'Urgency', desc: 'Health/safety risk? Time-sensitive?', icon: '', weight: 40 },
+  { name: 'Impact', desc: 'How many people affected? Infrastructure?', icon: '', weight: 30 },
+  { name: 'Recurrence', desc: 'Same issue reported multiple times?', icon: '', weight: 20 },
+  { name: 'Sentiment', desc: 'Citizens angry on social media?', icon: '', weight: 10 },
 ];
 
 export default function PrioritizationPage() {
@@ -52,7 +52,7 @@ export default function PrioritizationPage() {
 
           {/* Interactive Scorer */}
           <div className="glass-card" style={{ padding: 32, marginBottom: 48 }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 24 }}>🎛️ Interactive Priority Scorer</h3>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 24 }}>️ Interactive Priority Scorer</h3>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
               <div>

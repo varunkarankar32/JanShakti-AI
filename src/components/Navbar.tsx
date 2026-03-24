@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
+import Image from 'next/image';
 
 const navItems = [
   { label: 'Features', href: '/features' },
@@ -21,8 +22,14 @@ export default function Navbar() {
     <nav className="nav">
       <div className="nav-inner">
         <Link href="/" className="nav-logo">
-          <div className="nav-logo-icon">🏛️</div>
-          <span>जनशक्ति<span style={{ color: 'var(--accent-blue)' }}>.AI</span></span>
+          <Image
+            src="/images/Janshakti-Ai logo.jpeg"
+            alt="JanShakti.AI Logo"
+            width={140}
+            height={40}
+            priority
+            style={{ height: 'auto', width: 'auto', maxHeight: 40 }}
+          />
         </Link>
 
         <ul className="nav-links">
@@ -44,7 +51,7 @@ export default function Navbar() {
         </ul>
 
         <button className="mobile-menu-btn" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
-          {mobileOpen ? '✕' : '☰'}
+          {mobileOpen ? '' : ''}
         </button>
       </div>
 

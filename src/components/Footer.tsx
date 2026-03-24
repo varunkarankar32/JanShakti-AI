@@ -5,12 +5,12 @@ export default function Footer() {
     <footer className="footer">
       <div className="footer-grid">
         <div className="footer-brand">
-          <h3>🏛️ जनशक्ति<span style={{ color: 'var(--accent-blue)' }}>.AI</span></h3>
+          <h3>जनशक्ति<span style={{ color: 'var(--accent-blue)' }}>.AI</span></h3>
           <p>AI-powered citizen governance platform connecting citizens, data, and leaders — end to end. Built for India&apos;s 833M+ rural citizens.</p>
           <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
-            <span style={{ padding: '3px 10px', borderRadius: 4, background: '#F1F5F9', fontSize: '0.75rem', color: '#475569', border: '1px solid #E2E8F0' }}>🇮🇳 India-First</span>
-            <span style={{ padding: '3px 10px', borderRadius: 4, background: '#F1F5F9', fontSize: '0.75rem', color: '#475569', border: '1px solid #E2E8F0' }}>📱 Mobile-First</span>
-            <span style={{ padding: '3px 10px', borderRadius: 4, background: '#F1F5F9', fontSize: '0.75rem', color: '#475569', border: '1px solid #E2E8F0' }}>🔒 Encrypted</span>
+            <span style={{ padding: '3px 10px', borderRadius: 4, background: '#F1F5F9', fontSize: '0.75rem', color: '#475569', border: '1px solid #E2E8F0' }}>India-First</span>
+            <span style={{ padding: '3px 10px', borderRadius: 4, background: '#F1F5F9', fontSize: '0.75rem', color: '#475569', border: '1px solid #E2E8F0' }}>Mobile-First</span>
+            <span style={{ padding: '3px 10px', borderRadius: 4, background: '#F1F5F9', fontSize: '0.75rem', color: '#475569', border: '1px solid #E2E8F0' }}>Encrypted</span>
           </div>
         </div>
         <div className="footer-col">
@@ -36,11 +36,11 @@ export default function Footer() {
         <div className="footer-col">
           <h4>Team</h4>
           <ul>
-            <li><span style={{ color: '#64748B', fontSize: '0.85rem' }}>!PerfectIndian — IIITA</span></li>
-            <li><Link href="mailto:iec2023043@iiita.ac.in">Krishna Mohan</Link></li>
-            <li><Link href="mailto:iec2023037@iiita.ac.in">Varun Karankar</Link></li>
-            <li><Link href="mailto:iec2023038@iiita.ac.in">Aditya Kishore</Link></li>
-            <li><Link href="mailto:iec2023042@iiita.ac.in">Kanishk Jain</Link></li>
+            <li><span style={{ color: '#64748B', fontSize: '0.85rem' }}>!Perfect — IIITA</span></li>
+            <li><a href="https://www.linkedin.com/in/krishnamohan07/" target="_blank" rel="noopener noreferrer">Krishna Mohan</a></li>
+            <li><a href="https://www.linkedin.com/in/varun-karankar-9b62b2284/" target="_blank" rel="noopener noreferrer">Varun Karankar</a></li>
+            <li><a href="https://www.linkedin.com/in/adityak29/" target="_blank" rel="noopener noreferrer">Aditya Kishore</a></li>
+            <li><a href="https://www.linkedin.com/in/kanishk-jain-7690292b6/" target="_blank" rel="noopener noreferrer">Kanishk Jain</a></li>
           </ul>
         </div>
       </div>

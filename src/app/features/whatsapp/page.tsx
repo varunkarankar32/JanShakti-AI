@@ -7,31 +7,31 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8010'
 const FLOW_STEPS = [
   {
     user: 'hi',
-    bot: '🏛️ *जनशक्ति.AI — Citizen Governance Bot*\n\nनमस्ते! I can help you:\n\n1️⃣ *File a Complaint* — Type complaint\n2️⃣ *Check Status* — Type status\n3️⃣ *Send Photo* — Attach a photo\n4️⃣ *Voice Complaint* — Send a voice note\n\nType help anytime to see this menu.',
+    bot: '️ *जनशक्ति.AI — Citizen Governance Bot*\n\nनमस्ते! I can help you:\n\n1️⃣ *File a Complaint* — Type complaint\n2️⃣ *Check Status* — Type status\n3️⃣ *Send Photo* — Attach a photo\n4️⃣ *Voice Complaint* — Send a voice note\n\nType help anytime to see this menu.',
   },
   {
     user: 'complaint',
-    bot: '📋 *Select Category:*\n\n1. Water Supply\n2. Roads & Potholes\n3. Drainage\n4. Electricity\n5. Garbage & Sanitation\n6. Safety & Security\n7. Public Health\n\nReply with the number (1-7)',
+    bot: ' *Select Category:*\n\n1. Water Supply\n2. Roads & Potholes\n3. Drainage\n4. Electricity\n5. Garbage & Sanitation\n6. Safety & Security\n7. Public Health\n\nReply with the number (1-7)',
   },
   {
     user: '2',
-    bot: '✅ Category: *Roads & Potholes*\n\n📍 *Select your Ward:*\nReply with your ward number (1-25)\nExample: 5 for Ward 5',
+    bot: ' Category: *Roads & Potholes*\n\n *Select your Ward:*\nReply with your ward number (1-25)\nExample: 5 for Ward 5',
   },
   {
     user: '7',
-    bot: '✅ Ward: *Ward 7*\n\n📝 *Describe your complaint:*\nType your issue in detail. You can write in English or Hindi.',
+    bot: ' Ward: *Ward 7*\n\n *Describe your complaint:*\nType your issue in detail. You can write in English or Hindi.',
   },
   {
     user: 'Big pothole on main road near school causing accidents daily. Been there for 2 weeks.',
-    bot: '✅ *Complaint Filed Successfully!*\n\n🎫 Ticket ID: *TKT-X7B2K9*\n📂 Category: Roads & Potholes\n📍 Ward: Ward 7\n📝 Issue: Big pothole on main road near school...\n\n🤖 Our AI will prioritize your complaint and assign it to the nearest field team.\n\n📲 Track status anytime — just type status.',
+    bot: ' *Complaint Filed Successfully!*\n\n Ticket ID: *TKT-X7B2K9*\n Category: Roads & Potholes\n Ward: Ward 7\n Issue: Big pothole on main road near school...\n\n Our AI will prioritize your complaint and assign it to the nearest field team.\n\n Track status anytime — just type status.',
   },
   {
     user: 'status',
-    bot: '🔍 *Check Complaint Status*\n\nPlease enter your Ticket ID:\nExample: TKT-A1B2C3',
+    bot: ' *Check Complaint Status*\n\nPlease enter your Ticket ID:\nExample: TKT-A1B2C3',
   },
   {
     user: 'TKT-X7B2K9',
-    bot: '📋 *Complaint Status*\n\n🎫 Ticket: *TKT-X7B2K9*\n📂 Category: Roads & Potholes\n📍 Ward: Ward 7\n🟡 Status: *Assigned*\n⚡ Priority: P1\n🤖 AI Score: 78/100\n👷 Assigned: Road Repair Team B\n📅 Filed: 14 Mar 2026',
+    bot: ' *Complaint Status*\n\n Ticket: *TKT-X7B2K9*\n Category: Roads & Potholes\n Ward: Ward 7\n Status: *Assigned*\n Priority: P1\n AI Score: 78/100\n Assigned: Road Repair Team B\n Filed: 14 Mar 2026',
   },
 ];
 
@@ -85,8 +85,8 @@ export default function WhatsAppPage() {
         <p style={{ color: '#2563EB', fontWeight: 600, letterSpacing: 2, fontSize: 13, textTransform: 'uppercase', marginBottom: 12 }}>
           — WhatsApp Integration
         </p>
-        <h1 style={{ fontSize: 40, fontWeight: 800, color: '#0F172A', lineHeight: 1.2, marginBottom: 16 }}>
-          📱 WhatsApp Complaint Bot
+        <h1 style={{ fontSize: 40, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.2, marginBottom: 16 }}>
+           WhatsApp Complaint Bot
         </h1>
         <p style={{ fontSize: 18, color: '#64748B', maxWidth: 700 }}>
           Citizens can file complaints, send photos, record voice notes, and track status — all through WhatsApp. No app download needed.
@@ -96,8 +96,8 @@ export default function WhatsAppPage() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, alignItems: 'start' }}>
         {/* Live Demo */}
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: '#0F172A', marginBottom: 20 }}>
-            💬 Live Bot Demo
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 20 }}>
+             Live Bot Demo
           </h2>
 
           <div style={{
@@ -122,7 +122,7 @@ export default function WhatsAppPage() {
               alignItems: 'center',
               gap: 12,
             }}>
-              <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#25D366', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🏛️</div>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#25D366', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>️</div>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 15 }}>जनशक्ति.AI Bot</div>
                 <div style={{ fontSize: 12, opacity: 0.8 }}>Online</div>
@@ -145,7 +145,7 @@ export default function WhatsAppPage() {
                   }}>
                     {step.user}
                     <div style={{ fontSize: 10, color: '#999', textAlign: 'right', marginTop: 4 }}>
-                      {`${10 + i}:${String(i * 2 + 30).padStart(2, '0')}`} ✓✓
+                      {`${10 + i}:${String(i * 2 + 30).padStart(2, '0')}`} 
                     </div>
                   </div>
                 </div>
@@ -199,7 +199,7 @@ export default function WhatsAppPage() {
               style={{
                 marginTop: 16,
                 padding: '12px 28px',
-                background: '#0F172A',
+                background: 'var(--text-primary)',
                 color: 'white',
                 border: 'none',
                 borderRadius: 10,
@@ -209,12 +209,12 @@ export default function WhatsAppPage() {
                 width: '100%',
               }}
             >
-              🔄 Restart Demo
+               Restart Demo
             </button>
           )}
 
           <div style={{ marginTop: 16, background: '#F8FAFC', borderRadius: 10, border: '1px solid #E2E8F0', padding: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8, color: '#0F172A' }}>Try Live Bot Logic</div>
+            <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>Try Live Bot Logic</div>
             <div style={{ display: 'flex', gap: 8 }}>
               <input
                 value={simulatedInput}
@@ -236,43 +236,43 @@ export default function WhatsAppPage() {
 
         {/* Features List */}
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: '#0F172A', marginBottom: 20 }}>
-            🎯 Capabilities
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 20 }}>
+             Capabilities
           </h2>
 
           {[
             {
-              icon: '💬',
+              icon: '',
               title: 'Text Complaints',
               desc: 'Guided step-by-step flow: Category → Ward → Description. AI auto-classifies and scores priority.',
               color: '#25D366',
             },
             {
-              icon: '📸',
+              icon: '',
               title: 'Photo Detection',
               desc: 'Send a photo of a pothole, garbage dump, or broken pipe. YOLOv8 AI auto-detects and files complaint.',
               color: '#2563EB',
             },
             {
-              icon: '🎤',
+              icon: '',
               title: 'Voice Complaints',
               desc: 'Record a voice note in Hindi, Bhojpuri, Tamil, or 12+ languages. Whisper AI transcribes and classifies.',
               color: '#EA580C',
             },
             {
-              icon: '🔍',
+              icon: '',
               title: 'Status Tracking',
               desc: 'Type "status" + ticket ID anytime to get live updates. See priority, assignment, and resolution.',
               color: '#7C3AED',
             },
             {
-              icon: '📢',
+              icon: '',
               title: 'Proactive Notifications',
               desc: 'Automatic WhatsApp alerts when your complaint status changes — assigned, in progress, resolved.',
               color: '#DC2626',
             },
             {
-              icon: '🌐',
+              icon: '',
               title: 'Multi-Language Support',
               desc: 'Works in Hindi, English, Bhojpuri, Marathi, Bengali, Tamil, Telugu, and 5+ more Indian languages.',
               color: '#0891B2',
@@ -289,7 +289,7 @@ export default function WhatsAppPage() {
                 borderLeft: `4px solid ${feature.color}`,
               }}
             >
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', marginBottom: 6 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
                 {feature.icon} {feature.title}
               </h3>
               <p style={{ fontSize: 14, color: '#64748B', lineHeight: 1.5, margin: 0 }}>
@@ -307,7 +307,7 @@ export default function WhatsAppPage() {
             marginTop: 20,
           }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0369A1', marginBottom: 8 }}>
-              ⚙️ Setup Options
+              ️ Setup Options
             </h3>
             <ul style={{ fontSize: 14, color: '#0C4A6E', lineHeight: 2, margin: 0, paddingLeft: 20 }}>
               <li><strong>Twilio</strong> — Quick setup with sandbox (free trial)</li>
@@ -325,7 +325,7 @@ export default function WhatsAppPage() {
             marginTop: 12,
           }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, color: '#92400E', marginBottom: 8 }}>
-              🏗️ Architecture
+              ️ Architecture
             </h3>
             <p style={{ fontSize: 13, color: '#78350F', lineHeight: 1.6, margin: 0, fontFamily: 'monospace' }}>
               Citizen → WhatsApp → Twilio/Meta Webhook<br />

@@ -304,7 +304,7 @@ export default function AuthorityPage() {
 
       if (!res.ok) {
         const detail = await parseDetail(res);
-        setFeedback(`✕ ${detail}`);
+        setFeedback(` ${detail}`);
         return false;
       }
 
@@ -312,7 +312,7 @@ export default function AuthorityPage() {
       await fetchSelectedDetail();
       return true;
     } catch {
-      setFeedback('✕ Action failed. Please try again.');
+      setFeedback(' Action failed. Please try again.');
       return false;
     } finally {
       setLoadingAction(false);
@@ -323,7 +323,7 @@ export default function AuthorityPage() {
     if (!token || !selectedComplaint) return;
     const file = stage === 'before' ? beforePhoto : afterPhoto;
     if (!file) {
-      setFeedback(`✕ Choose a ${stage} photo first.`);
+      setFeedback(` Choose a ${stage} photo first.`);
       return;
     }
 
@@ -342,17 +342,17 @@ export default function AuthorityPage() {
 
       if (!res.ok) {
         const detail = await parseDetail(res);
-        setFeedback(`✕ ${detail}`);
+        setFeedback(` ${detail}`);
         return;
       }
 
-      setFeedback(`✓ ${stage === 'before' ? 'Before' : 'After'} evidence uploaded`);
+      setFeedback(` ${stage === 'before' ? 'Before' : 'After'} evidence uploaded`);
       if (stage === 'before') setBeforePhoto(null);
       if (stage === 'after') setAfterPhoto(null);
       await fetchQueue();
       await fetchSelectedDetail();
     } catch {
-      setFeedback('✕ Upload failed.');
+      setFeedback(' Upload failed.');
     } finally {
       setLoadingAction(false);
     }
@@ -371,18 +371,18 @@ export default function AuthorityPage() {
 
       if (!res.ok) {
         const detail = await parseDetail(res);
-        setFeedback(`✕ ${detail}`);
+        setFeedback(` ${detail}`);
         return;
       }
 
       const payload = await res.json();
       const engine = payload?.verification_engine ? ` via ${payload.verification_engine}` : '';
       const model = payload?.verification_model ? ` (${payload.verification_model})` : '';
-      setFeedback(`✓ AI verification ${payload.verification_status} (score ${payload.verification_score}/100)${engine}${model}. Leader can now close or request rework.`);
+      setFeedback(` AI verification ${payload.verification_status} (score ${payload.verification_score}/100)${engine}${model}. Leader can now close or request rework.`);
       await fetchQueue();
       await fetchSelectedDetail();
     } catch {
-      setFeedback('✕ Verification action failed. Please try again.');
+      setFeedback(' Verification action failed. Please try again.');
     } finally {
       setLoadingAction(false);
     }
@@ -625,7 +625,7 @@ export default function AuthorityPage() {
                       disabled={loadingAction}
                       onClick={async () => {
                         const ok = await runAction(`/api/complaints/${selectedComplaint.ticket_id}/authority/acknowledge`, { note: note.trim() || null });
-                        if (ok) setFeedback('✓ Complaint acknowledged and marked in progress.');
+                        if (ok) setFeedback(' Complaint acknowledged and marked in progress.');
                       }}
                     >
                       Acknowledge Assignment
@@ -662,7 +662,7 @@ export default function AuthorityPage() {
                           mark_verification_ready: requestVerification,
                         });
                         if (ok) {
-                          setFeedback('✓ Update sent to leader successfully.');
+                          setFeedback(' Update sent to leader successfully.');
                           setMessage('');
                         }
                       }}
@@ -699,9 +699,9 @@ export default function AuthorityPage() {
                   <div
                     style={{
                       borderRadius: 10,
-                      border: `1px solid ${feedback.startsWith('✕') ? '#FECACA' : '#BBF7D0'}`,
-                      background: feedback.startsWith('✕') ? '#FEF2F2' : '#F0FDF4',
-                      color: feedback.startsWith('✕') ? '#B91C1C' : '#166534',
+                      border: `1px solid ${feedback.startsWith('') ? '#FECACA' : '#BBF7D0'}`,
+                      background: feedback.startsWith('') ? '#FEF2F2' : '#F0FDF4',
+                      color: feedback.startsWith('') ? '#B91C1C' : '#166534',
                       padding: '10px 12px',
                       fontWeight: 600,
                     }}
