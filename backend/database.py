@@ -10,6 +10,9 @@ from config import (
     DEFAULT_AUTHORITY_NAME,
     DEFAULT_AUTHORITY_EMAIL,
     DEFAULT_AUTHORITY_PASSWORD,
+    DEFAULT_ADMIN_NAME,
+    DEFAULT_ADMIN_EMAIL,
+    DEFAULT_ADMIN_PASSWORD,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,15 +61,50 @@ def get_db():
         db.close()
 
 
-def _ensure_user_role_column():
+def _ensure_user_columns_sqlite():
     if not IS_SQLITE:
         return
     with engine.connect() as conn:
         result = conn.execute(text("PRAGMA table_info(users)"))
         columns = [row[1] for row in result.fetchall()]
+        if "state" not in columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN state VARCHAR"))
+        if "district" not in columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN district VARCHAR"))
         if "role" not in columns:
             conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR NOT NULL DEFAULT 'citizen'"))
+        if "is_active" not in columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
+        if "last_login_at" not in columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN last_login_at DATETIME"))
             conn.commit()
+
+
+def _ensure_user_columns_postgres():
+    if IS_SQLITE:
+        return
+
+    required_columns = {
+        "state": "VARCHAR",
+        "district": "VARCHAR",
+        "role": "VARCHAR NOT NULL DEFAULT 'citizen'",
+        "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
+        "last_login_at": "TIMESTAMP WITH TIME ZONE",
+    }
+
+    with engine.connect() as conn:
+        result = conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'users'"
+        ))
+        existing = {row[0] for row in result.fetchall()}
+
+        for name, col_type in required_columns.items():
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {col_type}"))
+                print(f"[DB] Added missing column: users.{name}")
+
+        conn.commit()
 
 
 def _ensure_complaint_workflow_columns():
@@ -162,6 +200,40 @@ def _seed_default_authority():
         db.close()
 
 
+def _seed_default_admin():
+    from models.user import User
+    from routers.auth import hash_password
+
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.email == DEFAULT_ADMIN_EMAIL).first()
+        if existing:
+            changed = False
+            if existing.role != "admin":
+                existing.role = "admin"
+                changed = True
+            if existing.is_active is False:
+                existing.is_active = True
+                changed = True
+            if changed:
+                db.commit()
+            return
+
+        admin = User(
+            name=DEFAULT_ADMIN_NAME,
+            email=DEFAULT_ADMIN_EMAIL,
+            phone=None,
+            role="admin",
+            hashed_password=hash_password(DEFAULT_ADMIN_PASSWORD),
+            is_active=True,
+        )
+        db.add(admin)
+        db.commit()
+        print(f"[Auth] Default admin ready: {DEFAULT_ADMIN_EMAIL}")
+    finally:
+        db.close()
+
+
 def init_db():
     """Initialize database tables. If PostgreSQL is unreachable,
     automatically fall back to a local SQLite database so the app
@@ -179,10 +251,12 @@ def init_db():
 
     try:
         if IS_SQLITE:
-            _ensure_user_role_column()
+            _ensure_user_columns_sqlite()
             _ensure_complaint_workflow_columns()
         else:
+            _ensure_user_columns_postgres()
             _ensure_pg_complaint_columns()
+        _seed_default_admin()
         _seed_default_leader()
         _seed_default_authority()
         print(f"[DB] ✅ Database initialized successfully (using {'SQLite' if IS_SQLITE else 'PostgreSQL'})")

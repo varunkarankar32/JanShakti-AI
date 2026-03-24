@@ -77,6 +77,8 @@ class GeminiAIService:
         parts: list,
         temperature: float = 0,
         max_tokens: int = 1024,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        response_mime_type: str = "application/json",
     ) -> Dict[str, Any]:
         """Low-level async Gemini API call."""
         if not self.enabled or not self.api_key:
@@ -88,16 +90,28 @@ class GeminiAIService:
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
-                "responseMimeType": "application/json",
+                "responseMimeType": response_mime_type,
                 "thinkingConfig": {"thinkingBudget": 0},
             },
         }
+        if tools:
+            payload["tools"] = tools
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(endpoint, json=payload)
 
         if resp.status_code >= 400:
-            return {"ok": False, "reason": f"gemini_http_{resp.status_code}"}
+            api_error = ""
+            try:
+                err = resp.json().get("error") or {}
+                api_error = str(err.get("message", "")).strip()
+            except Exception:
+                api_error = resp.text[:300]
+            return {
+                "ok": False,
+                "reason": f"gemini_http_{resp.status_code}",
+                "api_error": api_error[:400],
+            }
 
         data = resp.json()
         candidates = data.get("candidates") or []
@@ -112,8 +126,37 @@ class GeminiAIService:
         ]
         raw_text = "\n".join(text_chunks).strip()
         parsed = _extract_json(raw_text)
+        grounding = candidates[0].get("groundingMetadata") or {}
 
-        return {"ok": True, "raw": raw_text, "parsed": parsed}
+        return {"ok": True, "raw": raw_text, "parsed": parsed, "grounding": grounding}
+
+    def _extract_grounding_sources(self, grounding: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Extract and normalize web grounding sources from Gemini metadata."""
+        sources: List[Dict[str, str]] = []
+        chunks = grounding.get("groundingChunks") or []
+        seen = set()
+
+        for chunk in chunks:
+            if not isinstance(chunk, dict):
+                continue
+            web = chunk.get("web") or {}
+            uri = str(web.get("uri", "")).strip()
+            if not uri or uri in seen:
+                continue
+            seen.add(uri)
+            title = str(web.get("title", "")).strip() or "Untitled Source"
+            publisher = ""
+            if "//" in uri:
+                host = uri.split("//", 1)[1].split("/", 1)[0]
+                publisher = host.replace("www.", "")
+
+            sources.append({
+                "title": title[:180],
+                "url": uri[:500],
+                "publisher": publisher[:120],
+            })
+
+        return sources[:10]
 
     # ──────────────────────────────────────────────
     # 1. IMAGE → COMPLAINT AUTO-FILL
@@ -332,7 +375,10 @@ class GeminiAIService:
             return {"success": False, "error": str(exc)[:200], "ai_model": self.MODEL_NAME}
 
         if not result.get("ok"):
-            return {"success": False, "error": result.get("reason", "gemini_error"), "ai_model": self.MODEL_NAME}
+            reason = str(result.get("reason", "gemini_error"))
+            api_error = str(result.get("api_error", "")).strip()
+            error = reason if not api_error else f"{reason}: {api_error}"
+            return {"success": False, "error": error[:500], "ai_model": self.MODEL_NAME}
 
         parsed = result.get("parsed", {})
         if not parsed:
@@ -823,6 +869,130 @@ class GeminiAIService:
             "escalation_risk": str(parsed.get("escalation_risk", "")).strip()[:300],
             "similar_pattern": str(parsed.get("similar_pattern", "")).strip()[:200],
             "citizen_sentiment": str(parsed.get("citizen_sentiment", "")).strip()[:200],
+            "ai_model": self.MODEL_NAME,
+        }
+
+    # ──────────────────────────────────────────────
+    # 9. WEB-GROUNDED RUMOR FACT CHECK
+    # ──────────────────────────────────────────────
+
+    async def verify_rumor_with_news(
+        self,
+        claim_text: str,
+        region_hint: str = "India",
+        lookback_days: int = 7,
+    ) -> Dict[str, Any]:
+        """Fact-check a claim with Gemini web search grounding and source citations."""
+        normalized_claim = str(claim_text or "").strip()
+        if not normalized_claim:
+            return {
+                "success": False,
+                "error": "empty_claim",
+                "ai_model": self.MODEL_NAME,
+            }
+
+        days = max(1, min(30, int(lookback_days or 7)))
+
+        prompt = (
+            "You are a municipal misinformation analyst. Verify the claim using web/news sources. "
+            "Focus on whether the claim is supported by credible reporting from the last "
+            f"{days} days, especially in {region_hint}.\n\n"
+            "Return strict JSON:\n"
+            "{\n"
+            '  "claim": "normalized claim",\n'
+            '  "verdict": "Likely True"|"Likely False"|"Partly True"|"Insufficient Evidence",\n'
+            '  "confidence": number 0-1,\n'
+            '  "fact_summary": "4-6 sentence plain-language explanation",\n'
+            '  "is_listed_last_week": true|false,\n'
+            '  "last_week_signal_summary": "short summary of recent reporting or lack of it",\n'
+            '  "possible_fact_check_actions": ["action1", "action2", "action3"],\n'
+            '  "sources": [\n'
+            '    {"title": "source title", "publisher": "publisher/domain", "url": "https://...", "published_hint": "date if known or unknown", "relevance": "why this source matters"}\n'
+            "  ]\n"
+            "}\n"
+            "Rules: JSON only. Use cautious language where uncertain. Prefer credible sources and avoid unverified blogs.\n\n"
+            f"Claim: {normalized_claim[:1800]}\n"
+        )
+
+        parts = [{"text": prompt}]
+        tools = [{"google_search": {}}]
+
+        try:
+            result = await self._call_gemini(
+                parts,
+                temperature=0.1,
+                max_tokens=1600,
+                tools=tools,
+                response_mime_type="application/json",
+            )
+        except Exception as exc:
+            return {"success": False, "error": str(exc)[:200], "ai_model": self.MODEL_NAME}
+
+        # Quota/rate-limit guard: retry once with a lighter, non-tool request.
+        if not result.get("ok") and str(result.get("reason", "")).startswith("gemini_http_429"):
+            await asyncio.sleep(1.2)
+            try:
+                result = await self._call_gemini(
+                    parts,
+                    temperature=0.1,
+                    max_tokens=900,
+                    tools=None,
+                    response_mime_type="application/json",
+                )
+            except Exception as exc:
+                return {"success": False, "error": str(exc)[:200], "ai_model": self.MODEL_NAME}
+
+        if not result.get("ok"):
+            return {"success": False, "error": result.get("reason", "gemini_error"), "ai_model": self.MODEL_NAME}
+
+        parsed = result.get("parsed", {}) or {}
+        if not parsed:
+            return {"success": False, "error": "parse_failed", "ai_model": self.MODEL_NAME}
+
+        verdict = str(parsed.get("verdict", "Insufficient Evidence")).strip()
+        if verdict not in {"Likely True", "Likely False", "Partly True", "Insufficient Evidence"}:
+            verdict = "Insufficient Evidence"
+
+        raw_sources = parsed.get("sources") or []
+        sources: List[Dict[str, str]] = []
+        for src in raw_sources[:10]:
+            if not isinstance(src, dict):
+                continue
+            url = str(src.get("url", "")).strip()
+            if not url:
+                continue
+            sources.append({
+                "title": str(src.get("title", "")).strip()[:180],
+                "publisher": str(src.get("publisher", "")).strip()[:120],
+                "url": url[:500],
+                "published_hint": str(src.get("published_hint", "unknown")).strip()[:60],
+                "relevance": str(src.get("relevance", "")).strip()[:220],
+            })
+
+        grounding_sources = self._extract_grounding_sources(result.get("grounding") or {})
+        existing_urls = {s.get("url", "") for s in sources}
+        for g in grounding_sources:
+            if g.get("url") and g["url"] not in existing_urls:
+                sources.append({
+                    "title": g.get("title", "Untitled Source"),
+                    "publisher": g.get("publisher", ""),
+                    "url": g.get("url", ""),
+                    "published_hint": "unknown",
+                    "relevance": "Referenced by Gemini web grounding.",
+                })
+
+        return {
+            "success": True,
+            "claim": str(parsed.get("claim", normalized_claim)).strip()[:2000],
+            "verdict": verdict,
+            "confidence": round(_clamp(parsed.get("confidence"), 0, 1, 0.55), 3),
+            "fact_summary": str(parsed.get("fact_summary", "")).strip()[:1400],
+            "is_listed_last_week": bool(parsed.get("is_listed_last_week", False)),
+            "last_week_signal_summary": str(parsed.get("last_week_signal_summary", "")).strip()[:400],
+            "possible_fact_check_actions": [
+                str(a).strip()[:180] for a in (parsed.get("possible_fact_check_actions") or [])[:5]
+            ],
+            "sources": sources[:10],
             "ai_model": self.MODEL_NAME,
         }
 

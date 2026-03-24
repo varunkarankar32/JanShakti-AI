@@ -597,7 +597,7 @@ export default function DashboardPage() {
 
   if (authChecking) {
     return (
-      <main className="main-content" style={{ minHeight: 'calc(100vh - var(--nav-height))', display: 'grid', placeItems: 'center', background: 'var(--bg-secondary)' }}>
+      <main className="main-content portal-shell" style={{ minHeight: 'calc(100vh - var(--nav-height))', display: 'grid', placeItems: 'center' }}>
         <div className="glass-card" style={{ width: 'min(420px, 92vw)', textAlign: 'center' }}>
           <h2 style={{ fontSize: '1.2rem', marginBottom: 8 }}>Verifying Leader Session</h2>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Checking authentication...</p>
@@ -608,7 +608,7 @@ export default function DashboardPage() {
 
   if (!leaderToken || !leaderUser || leaderUser.role !== 'leader') {
     return (
-      <main className="main-content" style={{ minHeight: 'calc(100vh - var(--nav-height))', display: 'grid', placeItems: 'center', background: 'var(--bg-secondary)' }}>
+      <main className="main-content portal-shell" style={{ minHeight: 'calc(100vh - var(--nav-height))', display: 'grid', placeItems: 'center' }}>
         <div className="glass-card" style={{ width: 'min(460px, 94vw)', padding: 28 }}>
           <div className="section-label" style={{ marginBottom: 10 }}>LEADER ACCESS</div>
           <h1 style={{ fontSize: '1.5rem', marginBottom: 8 }}>Leader Dashboard Login</h1>
@@ -655,11 +655,11 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="main-content">
+    <main className="main-content portal-shell">
       <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', minHeight: 'calc(100vh - var(--nav-height))' }}>
         {/* Sidebar */}
         <div style={{
-          background: 'var(--bg-secondary)', borderRight: '1px solid var(--border-subtle)',
+          background: 'linear-gradient(180deg, rgba(239,246,255,0.9), rgba(226,238,255,0.9))', borderRight: '1px solid var(--border-subtle)',
           padding: '24px 12px', position: 'sticky', top: 'var(--nav-height)',
           height: 'calc(100vh - var(--nav-height))', overflowY: 'auto',
         }}>
@@ -1159,7 +1159,7 @@ export default function DashboardPage() {
               )}
 
               {selectedComplaint && (
-                <div ref={assignPanelRef} style={{ marginTop: 20, padding: 18, borderRadius: 10, border: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
+                <div ref={assignPanelRef} style={{ marginTop: 20, padding: 18, borderRadius: 12, border: '1px solid var(--border-subtle)', background: 'linear-gradient(135deg, rgba(255,255,255,0.9), rgba(224,242,254,0.62))' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 10 }}>
                     <div>
                       <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>Workflow Control</div>

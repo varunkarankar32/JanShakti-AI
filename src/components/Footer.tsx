@@ -8,9 +8,9 @@ export default function Footer() {
           <h3>जनशक्ति<span style={{ color: 'var(--accent-blue)' }}>.AI</span></h3>
           <p>AI-powered citizen governance platform connecting citizens, data, and leaders — end to end. Built for India&apos;s 833M+ rural citizens.</p>
           <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
-            <span style={{ padding: '3px 10px', borderRadius: 4, background: '#F1F5F9', fontSize: '0.75rem', color: '#475569', border: '1px solid #E2E8F0' }}>India-First</span>
-            <span style={{ padding: '3px 10px', borderRadius: 4, background: '#F1F5F9', fontSize: '0.75rem', color: '#475569', border: '1px solid #E2E8F0' }}>Mobile-First</span>
-            <span style={{ padding: '3px 10px', borderRadius: 4, background: '#F1F5F9', fontSize: '0.75rem', color: '#475569', border: '1px solid #E2E8F0' }}>Encrypted</span>
+            <span style={{ padding: '3px 10px', borderRadius: 6, background: 'linear-gradient(120deg, #DBEAFE, #E0F2FE)', fontSize: '0.75rem', color: '#1E3A8A', border: '1px solid #BFDBFE' }}>India-First</span>
+            <span style={{ padding: '3px 10px', borderRadius: 6, background: 'linear-gradient(120deg, #DBEAFE, #E0F2FE)', fontSize: '0.75rem', color: '#1E3A8A', border: '1px solid #BFDBFE' }}>Mobile-First</span>
+            <span style={{ padding: '3px 10px', borderRadius: 6, background: 'linear-gradient(120deg, #DBEAFE, #E0F2FE)', fontSize: '0.75rem', color: '#1E3A8A', border: '1px solid #BFDBFE' }}>Encrypted</span>
           </div>
         </div>
         <div className="footer-col">

@@ -8,6 +8,7 @@ import Image from 'next/image';
 const navItems = [
   { label: 'Features', href: '/features' },
   { label: 'Dashboard', href: '/dashboard' },
+  { label: 'Admin Portal', href: '/admin' },
   { label: 'Authority Panel', href: '/authority' },
   { label: 'Citizen Portal', href: '/citizen' },
   { label: 'Architecture', href: '/architecture' },
@@ -51,14 +52,14 @@ export default function Navbar() {
         </ul>
 
         <button className="mobile-menu-btn" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
-          {mobileOpen ? '' : ''}
+          {mobileOpen ? 'X' : 'Menu'}
         </button>
       </div>
 
       {mobileOpen && (
         <div style={{
           position: 'absolute', top: 'var(--nav-height)', left: 0, right: 0,
-          background: 'rgba(255,255,255,0.98)', backdropFilter: 'blur(12px)',
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(238,246,255,0.98))', backdropFilter: 'blur(12px)',
           borderBottom: '1px solid var(--border-subtle)', padding: '16px 24px',
           animation: 'fadeInUp 0.3s ease', boxShadow: 'var(--shadow-lg)',
         }}>

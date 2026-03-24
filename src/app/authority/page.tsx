@@ -390,7 +390,7 @@ export default function AuthorityPage() {
 
   if (checkingAuth) {
     return (
-      <main style={{ marginTop: 'var(--nav-height)', minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+      <main className="main-content portal-shell" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
         <div className="glass-card">Checking authority session...</div>
       </main>
     );
@@ -398,7 +398,7 @@ export default function AuthorityPage() {
 
   if (!token || !user) {
     return (
-      <main style={{ marginTop: 'var(--nav-height)', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '42px 0' }}>
+      <main className="main-content portal-shell" style={{ minHeight: '100vh', padding: '42px 0' }}>
         <div className="container" style={{ maxWidth: 540 }}>
           <div className="glass-card" style={{ padding: 30 }}>
             <p className="section-label">Authority Access</p>
@@ -445,7 +445,7 @@ export default function AuthorityPage() {
   }
 
   return (
-    <main style={{ marginTop: 'var(--nav-height)', minHeight: '100vh', background: 'var(--bg-secondary)', padding: '28px 0 36px' }}>
+    <main className="main-content portal-shell" style={{ minHeight: '100vh', padding: '28px 0 36px' }}>
       <div className="container" style={{ display: 'grid', gap: 16 }}>
         <section className="glass-card" style={{ display: 'grid', gap: 14 }}>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'space-between', flexWrap: 'wrap' }}>
@@ -498,7 +498,7 @@ export default function AuthorityPage() {
                       textAlign: 'left',
                       border: `1px solid ${active ? 'var(--accent-blue)' : 'var(--border-subtle)'}`,
                       borderRadius: 10,
-                      background: active ? 'rgba(30,64,175,0.06)' : 'white',
+                      background: active ? 'rgba(37,99,235,0.12)' : 'rgba(255,255,255,0.76)',
                       padding: 12,
                       cursor: 'pointer',
                     }}

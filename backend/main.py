@@ -60,7 +60,7 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # Import and register routers
-from routers import complaints, nlp, priority, sentiment, vision, speech, reports, dashboard, whatsapp, auth, announcements
+from routers import complaints, nlp, priority, sentiment, vision, speech, reports, dashboard, whatsapp, auth, announcements, admin
 
 app.include_router(complaints.router, prefix=API_PREFIX)
 app.include_router(auth.router, prefix=API_PREFIX)
@@ -73,6 +73,7 @@ app.include_router(reports.router, prefix=API_PREFIX)
 app.include_router(dashboard.router, prefix=API_PREFIX)
 app.include_router(whatsapp.router, prefix=API_PREFIX)
 app.include_router(announcements.router, prefix=API_PREFIX)
+app.include_router(admin.router, prefix=API_PREFIX)
 
 
 @app.on_event("startup")
@@ -102,6 +103,7 @@ def root():
             "auth_signup": f"{API_PREFIX}/auth/signup",
             "auth_login": f"{API_PREFIX}/auth/login",
             "auth_leader_login": f"{API_PREFIX}/auth/leader/login",
+            "auth_admin_login": f"{API_PREFIX}/auth/admin/login",
             "nlp_classify": f"{API_PREFIX}/nlp/classify",
             "priority_score": f"{API_PREFIX}/priority/score",
             "sentiment_analyze": f"{API_PREFIX}/sentiment/analyze",
@@ -110,6 +112,7 @@ def root():
             "report_generate": f"{API_PREFIX}/reports/generate",
             "dashboard_stats": f"{API_PREFIX}/dashboard/stats",
             "announcements_public": f"{API_PREFIX}/announcements/public",
+            "admin_users": f"{API_PREFIX}/admin/users",
             "whatsapp_webhook": f"{API_PREFIX}/whatsapp/webhook",
             "whatsapp_test": f"{API_PREFIX}/whatsapp/test",
         },

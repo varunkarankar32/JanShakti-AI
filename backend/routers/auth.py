@@ -111,12 +111,20 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if user.is_active is False:
+        raise HTTPException(status_code=403, detail="Account is inactive")
     return user
 
 
 def get_current_leader(current_user: User = Depends(get_current_user)) -> User:
     if (current_user.role or "citizen") != "leader":
         raise HTTPException(status_code=403, detail="Leader access required")
+    return current_user
+
+
+def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
+    if (current_user.role or "citizen") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
 
 
@@ -144,6 +152,12 @@ def _auth_payload(user: User) -> dict:
             "role": user.role or "citizen",
         },
     }
+
+
+def _touch_last_login(db: Session, user: User) -> None:
+    user.last_login_at = datetime.now(timezone.utc)
+    db.add(user)
+    db.commit()
 
 
 # --- Endpoints ---
@@ -176,6 +190,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if not user or not verify_password(req.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    _touch_last_login(db, user)
     return _auth_payload(user)
 
 
@@ -186,6 +201,7 @@ def leader_login(req: LoginRequest, db: Session = Depends(get_db)):
     if not user or (user.role or "citizen") != "leader" or not verify_password(req.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid leader credentials")
 
+    _touch_last_login(db, user)
     return _auth_payload(user)
 
 
@@ -196,6 +212,20 @@ def authority_login(req: LoginRequest, db: Session = Depends(get_db)):
     if not user or (user.role or "citizen") != "authority" or not verify_password(req.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid authority credentials")
 
+    _touch_last_login(db, user)
+    return _auth_payload(user)
+
+
+@router.post("/admin/login", response_model=AuthResponse)
+def admin_login(req: LoginRequest, db: Session = Depends(get_db)):
+    """Login endpoint that only allows admin accounts."""
+    user = db.query(User).filter(User.email == req.email).first()
+    if not user or (user.role or "citizen") != "admin" or not verify_password(req.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
+    if user.is_active is False:
+        raise HTTPException(status_code=403, detail="Admin account is inactive")
+
+    _touch_last_login(db, user)
     return _auth_payload(user)
 
 

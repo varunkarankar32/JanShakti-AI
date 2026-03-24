@@ -920,7 +920,7 @@ export default function CitizenPortal() {
   };
 
   return (
-    <main className="main-content">
+    <main className="main-content portal-shell">
       <section className="section" style={{ paddingTop: 80 }}>
         <div className="container">
           <div className="section-label">CITIZEN PORTAL</div>
@@ -978,7 +978,7 @@ export default function CitizenPortal() {
                           borderRadius: 8,
                           cursor: 'pointer',
                           border: 'none',
-                          background: authMode === 'signup' ? 'rgba(59,130,246,0.15)' : 'var(--bg-tertiary)',
+                          background: authMode === 'signup' ? 'rgba(59,130,246,0.15)' : 'rgba(224,231,255,0.7)',
                           color: authMode === 'signup' ? 'var(--accent-blue-light)' : 'var(--text-secondary)',
                           fontWeight: 600,
                         }}
@@ -993,7 +993,7 @@ export default function CitizenPortal() {
                           borderRadius: 8,
                           cursor: 'pointer',
                           border: 'none',
-                          background: authMode === 'login' ? 'rgba(59,130,246,0.15)' : 'var(--bg-tertiary)',
+                          background: authMode === 'login' ? 'rgba(59,130,246,0.15)' : 'rgba(224,231,255,0.7)',
                           color: authMode === 'login' ? 'var(--accent-blue-light)' : 'var(--text-secondary)',
                           fontWeight: 600,
                         }}
@@ -1085,7 +1085,7 @@ export default function CitizenPortal() {
                             borderRadius: 8,
                             cursor: 'pointer',
                             border: 'none',
-                            background: inputMode === mode.key ? 'rgba(59,130,246,0.15)' : 'var(--bg-tertiary)',
+                            background: inputMode === mode.key ? 'rgba(59,130,246,0.15)' : 'rgba(224,231,255,0.7)',
                             color: inputMode === mode.key ? 'var(--accent-blue-light)' : 'var(--text-secondary)',
                             fontWeight: 600,
                             fontSize: '0.85rem',

@@ -57,8 +57,15 @@ type MisinfoAlert = {
 type FactCheck = {
   claim: string;
   verdict: string;
-  fact: string;
-  source: string;
+  fact_summary: string;
+  fact?: string;
+  source?: string;
+  is_listed_last_week?: boolean;
+  last_week_signal_summary?: string;
+  possible_fact_check_actions?: string[];
+  sources?: { title: string; publisher: string; url: string; published_hint?: string; relevance?: string }[];
+  provider?: string;
+  fallback_reason?: string;
   affected_ward: string;
   confidence: number;
 };
@@ -79,12 +86,34 @@ export default function SocialMediaPage() {
   const [factChecks, setFactChecks] = useState<FactCheck[]>([]);
   const [starvationWatch, setStarvationWatch] = useState<StarvationWatch | null>(null);
   const [factInput, setFactInput] = useState('');
+  const [factRegion, setFactRegion] = useState('India');
+  const [factLookback, setFactLookback] = useState(7);
   const [factResult, setFactResult] = useState<FactCheck | null>(null);
   const [factLoading, setFactLoading] = useState(false);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [govIntel, setGovIntel] = useState<any>(null);
   const [govLoading, setGovLoading] = useState(false);
+
+  const runGovernanceIntelligence = async () => {
+    setGovLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/dashboard/governance-intelligence`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ region: 'Municipal Region' }),
+      });
+      if (res.ok) {
+        setGovIntel(await res.json());
+      } else {
+        setGovIntel(null);
+      }
+    } catch {
+      setGovIntel(null);
+    } finally {
+      setGovLoading(false);
+    }
+  };
 
   const runManualFactCheck = async () => {
     if (!factInput.trim()) return;
@@ -95,15 +124,24 @@ export default function SocialMediaPage() {
       const res = await fetch(`${API_BASE}/api/nlp/fact-check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: factInput.trim() }),
+        body: JSON.stringify({
+          text: factInput.trim(),
+          region: factRegion.trim() || 'India',
+          lookback_days: factLookback,
+        }),
       });
       if (!res.ok) return;
       const data = await res.json();
       setFactResult({
-        claim: data.input || factInput,
+        claim: data.claim || data.input || factInput,
         verdict: data.verdict,
-        fact: data.fact,
-        source: data.source,
+        fact_summary: data.fact_summary || data.fact,
+        is_listed_last_week: data.is_listed_last_week,
+        last_week_signal_summary: data.last_week_signal_summary,
+        possible_fact_check_actions: data.possible_fact_check_actions || [],
+        sources: data.sources || [],
+        provider: data.provider,
+        fallback_reason: data.fallback_reason,
         affected_ward: 'Manual Check',
         confidence: data.confidence || 0,
       });
@@ -156,27 +194,23 @@ export default function SocialMediaPage() {
     };
 
     load();
-
-    // Auto-run governance intelligence
-    const loadGov = async () => {
-      setGovLoading(true);
-      try {
-        const res = await fetch(`${API_BASE}/api/dashboard/governance-intelligence`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ region: 'Municipal Region' }),
-        });
-        if (res.ok) {
-          setGovIntel(await res.json());
-        }
-      } catch {
-        setGovIntel(null);
-      } finally {
-        setGovLoading(false);
-      }
-    };
-    loadGov();
   }, []);
+
+  // — Helpers for verdict styling —
+  const getVerdictColor = (verdict: string) => {
+    switch (verdict) {
+      case 'Likely True': return { bg: 'rgba(34,197,94,0.15)', color: '#15803d', border: 'rgba(34,197,94,0.4)', icon: '✅' };
+      case 'Likely False': return { bg: 'rgba(239,68,68,0.15)', color: '#dc2626', border: 'rgba(239,68,68,0.4)', icon: '❌' };
+      case 'Partly True': return { bg: 'rgba(245,158,11,0.15)', color: '#b45309', border: 'rgba(245,158,11,0.4)', icon: '⚠️' };
+      default: return { bg: 'rgba(148,163,184,0.15)', color: '#475569', border: 'rgba(148,163,184,0.4)', icon: '❓' };
+    }
+  };
+
+  const getConfidenceBar = (confidence: number) => {
+    const pct = Math.round(confidence * 100);
+    const hue = pct > 70 ? 142 : pct > 40 ? 38 : 0;
+    return { pct, hue };
+  };
 
   return (
     <main className="main-content">
@@ -288,6 +322,7 @@ export default function SocialMediaPage() {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20, marginTop: 24 }}>
+            {/* Rumor Detection — compact card */}
             <div className="glass-card" style={{ padding: 22 }}>
               <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>Rumor Detection & Fact Checks</h3>
               <div style={{ display: 'grid', gap: 10 }}>
@@ -308,34 +343,11 @@ export default function SocialMediaPage() {
                     <div key={`${fc.claim}-${idx}`} style={{ fontSize: '0.78rem', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 8 }}>
                       <div><strong>Claim:</strong> {fc.claim}</div>
                       <div><strong>Verdict:</strong> {fc.verdict}</div>
-                      <div><strong>Fact:</strong> {fc.fact}</div>
+                      <div><strong>Fact:</strong> {fc.fact_summary || fc.fact}</div>
                     </div>
                   ))}
                 </div>
               )}
-
-              <div style={{ marginTop: 12, borderTop: '1px solid var(--border-subtle)', paddingTop: 10 }}>
-                <div style={{ fontSize: '0.78rem', fontWeight: 700, marginBottom: 6 }}>Manual Rumor Fact Check</div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    value={factInput}
-                    onChange={(e) => setFactInput(e.target.value)}
-                    placeholder="Paste rumor text to verify"
-                    style={{ flex: 1, border: '1px solid var(--border-subtle)', borderRadius: 8, padding: '8px 10px', fontSize: '0.8rem' }}
-                  />
-                  <button className="btn btn-secondary" onClick={runManualFactCheck} disabled={factLoading}>
-                    {factLoading ? 'Checking...' : 'Verify'}
-                  </button>
-                </div>
-
-                {factResult && (
-                  <div style={{ marginTop: 8, border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 8, fontSize: '0.78rem' }}>
-                    <div><strong>Verdict:</strong> {factResult.verdict}</div>
-                    <div><strong>Fact:</strong> {factResult.fact}</div>
-                    <div style={{ color: 'var(--text-tertiary)' }}>{factResult.source}</div>
-                  </div>
-                )}
-              </div>
             </div>
 
             <div className="glass-card" style={{ padding: 22 }}>
@@ -346,11 +358,11 @@ export default function SocialMediaPage() {
                 <>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
                     <div className="glass-card" style={{ padding: 12 }}>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>Unresponded {'>'}24h</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>Unresponded {'>'} 24h</div>
                       <div style={{ fontWeight: 800, fontSize: '1.2rem', color: '#ea580c' }}>{starvationWatch.unresponded_24h}</div>
                     </div>
                     <div className="glass-card" style={{ padding: 12 }}>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>Unresponded {'>'}72h</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>Unresponded {'>'} 72h</div>
                       <div style={{ fontWeight: 800, fontSize: '1.2rem', color: '#dc2626' }}>{starvationWatch.unresponded_72h}</div>
                     </div>
                   </div>
@@ -368,12 +380,434 @@ export default function SocialMediaPage() {
             </div>
           </div>
 
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {/* ═══  HYBRID NEWS FACT-CHECK — DEDICATED SECTION  ═══ */}
+          {/* ═══════════════════════════════════════════════════════════ */}
+          <div className="glass-card" style={{
+            padding: 0,
+            marginTop: 28,
+            border: '1px solid rgba(16,185,129,0.25)',
+            overflow: 'hidden',
+            position: 'relative',
+          }}>
+            {/* Header Band */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(16,185,129,0.12) 0%, rgba(59,130,246,0.10) 50%, rgba(139,92,246,0.10) 100%)',
+              borderBottom: '1px solid rgba(16,185,129,0.18)',
+              padding: '18px 24px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}>
+              <div style={{ fontSize: '1.5rem' }}>🔍</div>
+              <div>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0, letterSpacing: '-0.01em' }}>
+                  AI Rumor Fact-Check
+                </h3>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                  Paste any news, rumor, or WhatsApp forward — the verifier cross-checks live news evidence in seconds
+                </div>
+              </div>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{
+                  fontSize: '0.62rem',
+                  background: 'linear-gradient(135deg, #10b981, #3b82f6)',
+                  color: '#fff',
+                  padding: '3px 10px',
+                  borderRadius: 12,
+                  fontWeight: 700,
+                  letterSpacing: '0.02em',
+                }}>Hybrid Verifier</span>
+                <span style={{
+                  fontSize: '0.62rem',
+                  background: 'rgba(245,158,11,0.15)',
+                  color: '#b45309',
+                  padding: '3px 10px',
+                  borderRadius: 12,
+                  fontWeight: 700,
+                }}>+ News RSS + NLI</span>
+              </div>
+            </div>
+
+            {/* Input Area */}
+            <div style={{ padding: '20px 24px 16px' }}>
+              <textarea
+                id="fact-check-input"
+                value={factInput}
+                onChange={(e) => setFactInput(e.target.value)}
+                placeholder={"Paste a rumor, WhatsApp forward, viral message, or news claim here...\n\nFor best results, include: the full message text, any dates mentioned, names of places or people, and any links if available. The verifier scans major Indian and international news sites from the selected lookback window."}
+                rows={7}
+                style={{
+                  width: '100%',
+                  border: '1.5px solid var(--border-subtle)',
+                  borderRadius: 14,
+                  padding: '14px 16px',
+                  fontSize: '0.88rem',
+                  lineHeight: 1.6,
+                  resize: 'vertical',
+                  background: 'rgba(15,23,42,0.02)',
+                  transition: 'border-color 0.2s, box-shadow 0.2s',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = 'rgba(16,185,129,0.5)';
+                  e.currentTarget.style.boxShadow = '0 0 0 3px rgba(16,185,129,0.08)';
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              />
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr auto',
+                gap: 10,
+                marginTop: 12,
+                alignItems: 'end',
+              }}>
+                <div>
+                  <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: 4, display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Region / Location
+                  </label>
+                  <input
+                    id="fact-check-region"
+                    value={factRegion}
+                    onChange={(e) => setFactRegion(e.target.value)}
+                    placeholder="India, Delhi, Maharashtra..."
+                    style={{
+                      width: '100%',
+                      border: '1.5px solid var(--border-subtle)',
+                      borderRadius: 10,
+                      padding: '10px 12px',
+                      fontSize: '0.82rem',
+                      outline: 'none',
+                      transition: 'border-color 0.2s',
+                      fontFamily: 'inherit',
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: 4, display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Lookback ({factLookback} days)
+                  </label>
+                  <input
+                    id="fact-check-lookback"
+                    type="range"
+                    min={1}
+                    max={30}
+                    value={factLookback}
+                    onChange={(e) => setFactLookback(Number(e.target.value))}
+                    style={{
+                      width: '100%',
+                      height: 38,
+                      accentColor: '#10b981',
+                      cursor: 'pointer',
+                    }}
+                  />
+                </div>
+                <button
+                  id="fact-check-submit"
+                  onClick={runManualFactCheck}
+                  disabled={factLoading || !factInput.trim()}
+                  style={{
+                    background: factLoading ? 'rgba(16,185,129,0.3)' : 'linear-gradient(135deg, #10b981, #059669)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 12,
+                    padding: '12px 28px',
+                    fontSize: '0.88rem',
+                    fontWeight: 700,
+                    cursor: factLoading || !factInput.trim() ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s',
+                    whiteSpace: 'nowrap',
+                    opacity: !factInput.trim() && !factLoading ? 0.5 : 1,
+                    letterSpacing: '0.01em',
+                  }}
+                >
+                  {factLoading ? '⏳ Analyzing...' : '🔍 Verify Now'}
+                </button>
+              </div>
+            </div>
+
+            {/* Loading State */}
+            {factLoading && (
+              <div style={{
+                padding: '40px 24px',
+                textAlign: 'center',
+                background: 'linear-gradient(180deg, rgba(16,185,129,0.04) 0%, transparent 100%)',
+              }}>
+                <div style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  background: 'rgba(16,185,129,0.08)',
+                  border: '1px solid rgba(16,185,129,0.2)',
+                  borderRadius: 16,
+                  padding: '14px 24px',
+                }}>
+                  <div style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: '50%',
+                    border: '2.5px solid rgba(16,185,129,0.3)',
+                    borderTopColor: '#10b981',
+                    animation: 'spin 0.8s linear infinite',
+                  }} />
+                  <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#10b981' }}>
+                    Verifying claim across recent news sources...
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 10 }}>
+                  Searching Google News RSS • Scoring support vs contradiction • Cross-referencing publishers
+                </div>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              </div>
+            )}
+
+            {/* Result Display */}
+            {factResult && !factLoading && (() => {
+              const vc = getVerdictColor(factResult.verdict);
+              const cb = getConfidenceBar(factResult.confidence);
+              return (
+                <div style={{ padding: '0 24px 24px' }}>
+                  {/* Verdict Header */}
+                  <div style={{
+                    background: vc.bg,
+                    border: `1.5px solid ${vc.border}`,
+                    borderRadius: 14,
+                    padding: '16px 20px',
+                    marginBottom: 16,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+                      <span style={{ fontSize: '1.5rem' }}>{vc.icon}</span>
+                      <span style={{
+                        fontSize: '1.1rem',
+                        fontWeight: 800,
+                        color: vc.color,
+                        letterSpacing: '-0.01em',
+                      }}>
+                        {factResult.verdict}
+                      </span>
+
+                      {/* Confidence */}
+                      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 100, height: 7, background: 'rgba(0,0,0,0.08)', borderRadius: 10, overflow: 'hidden' }}>
+                          <div style={{
+                            width: `${cb.pct}%`,
+                            height: '100%',
+                            background: `hsl(${cb.hue}, 70%, 45%)`,
+                            borderRadius: 10,
+                            transition: 'width 0.6s ease',
+                          }} />
+                        </div>
+                        <span style={{ fontSize: '0.74rem', fontWeight: 700, color: `hsl(${cb.hue}, 70%, 40%)` }}>
+                          {cb.pct}%
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Signal Badges */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                      <span style={{
+                        borderRadius: 999,
+                        padding: '3px 10px',
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        background: factResult.is_listed_last_week ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.12)',
+                        color: factResult.is_listed_last_week ? '#15803d' : '#dc2626',
+                      }}>
+                        {factResult.is_listed_last_week ? '📰 Found in Recent News' : '🚫 Not Found in Recent News'}
+                      </span>
+                      {factResult.provider && (
+                        <span style={{
+                          borderRadius: 999,
+                          padding: '3px 10px',
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          background: 'rgba(99,102,241,0.12)',
+                          color: '#4338ca',
+                        }}>
+                          🤖 {factResult.provider === 'hybrid_news_nli_v1' ? 'Hybrid News + NLI' : factResult.provider === 'civic_kb_fallback' ? 'Civic KB (Fallback)' : factResult.provider}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Claim */}
+                    <div style={{ fontSize: '0.82rem', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                      <strong style={{ color: 'var(--text-primary)' }}>Claim:</strong> {factResult.claim}
+                    </div>
+                  </div>
+
+                  {/* AI Explanation */}
+                  <div style={{
+                    background: 'rgba(59,130,246,0.04)',
+                    border: '1px solid rgba(59,130,246,0.15)',
+                    borderRadius: 12,
+                    padding: '14px 18px',
+                    marginBottom: 16,
+                  }}>
+                    <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#3b82f6', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      🧠 AI Analysis
+                    </div>
+                    <div style={{ fontSize: '0.84rem', lineHeight: 1.65, color: 'var(--text-primary)' }}>
+                      {factResult.fact_summary}
+                    </div>
+                  </div>
+
+                  {/* Recent News Signal */}
+                  {factResult.last_week_signal_summary && (
+                    <div style={{
+                      background: 'rgba(245,158,11,0.05)',
+                      border: '1px solid rgba(245,158,11,0.2)',
+                      borderRadius: 12,
+                      padding: '12px 18px',
+                      marginBottom: 16,
+                    }}>
+                      <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#b45309', marginBottom: 4 }}>
+                        📅 Recent News Coverage Signal
+                      </div>
+                      <div style={{ fontSize: '0.82rem', lineHeight: 1.55, color: 'var(--text-secondary)' }}>
+                        {factResult.last_week_signal_summary}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Fallback Technical Note */}
+                  {factResult.fallback_reason && (
+                    <div style={{
+                      background: 'rgba(245,158,11,0.06)',
+                      border: '1px solid rgba(245,158,11,0.2)',
+                      borderRadius: 10,
+                      padding: '10px 14px',
+                      marginBottom: 16,
+                      fontSize: '0.76rem',
+                      color: '#b45309',
+                    }}>
+                      <strong>⚙️ Technical Note:</strong> {factResult.fallback_reason}
+                    </div>
+                  )}
+
+                  {/* Two-Column: Sources + Actions */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: (factResult.sources && factResult.sources.length > 0) ? '2fr 1fr' : '1fr',
+                    gap: 16,
+                  }}>
+                    {/* Sources */}
+                    {factResult.sources && factResult.sources.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, marginBottom: 8, color: 'var(--text-primary)' }}>
+                          📎 Sources ({factResult.sources.length})
+                        </div>
+                        <div style={{ display: 'grid', gap: 8 }}>
+                          {factResult.sources.slice(0, 8).map((src, idx) => (
+                            <div key={`${src.url}-${idx}`} style={{
+                              border: '1px solid var(--border-subtle)',
+                              borderRadius: 10,
+                              padding: '10px 12px',
+                              background: 'rgba(255,255,255,0.6)',
+                              transition: 'border-color 0.15s, transform 0.15s',
+                            }}>
+                              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 2 }}>
+                                {src.title || src.publisher || 'News Source'}
+                              </div>
+                              <div style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)', marginBottom: 4 }}>
+                                {src.publisher || 'Unknown Publisher'} • {src.published_hint || 'unknown date'}
+                              </div>
+                              {src.relevance && (
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: 4 }}>
+                                  {src.relevance}
+                                </div>
+                              )}
+                              {src.url && (
+                                <a
+                                  href={src.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{
+                                    display: 'inline-block',
+                                    fontSize: '0.7rem',
+                                    color: '#3b82f6',
+                                    textDecoration: 'none',
+                                    wordBreak: 'break-all',
+                                  }}
+                                >
+                                  🔗 {src.url.length > 80 ? src.url.slice(0, 80) + '...' : src.url}
+                                </a>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* No sources fallback */}
+                    {(!factResult.sources || factResult.sources.length === 0) && (
+                      <div style={{
+                        border: '1px dashed var(--border-subtle)',
+                        borderRadius: 10,
+                        padding: 16,
+                        textAlign: 'center',
+                        color: 'var(--text-tertiary)',
+                        fontSize: '0.8rem',
+                      }}>
+                        No matching news sources found for this claim.
+                      </div>
+                    )}
+
+                    {/* Recommended Actions */}
+                    {factResult.possible_fact_check_actions && factResult.possible_fact_check_actions.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, marginBottom: 8, color: 'var(--text-primary)' }}>
+                          💡 Recommended Actions
+                        </div>
+                        <div style={{
+                          background: 'rgba(139,92,246,0.05)',
+                          border: '1px solid rgba(139,92,246,0.15)',
+                          borderRadius: 10,
+                          padding: '12px 14px',
+                          display: 'grid',
+                          gap: 6,
+                        }}>
+                          {factResult.possible_fact_check_actions.slice(0, 5).map((action, idx) => (
+                            <div key={`action-${idx}`} style={{
+                              fontSize: '0.76rem',
+                              color: 'var(--text-secondary)',
+                              lineHeight: 1.5,
+                              paddingLeft: 16,
+                              position: 'relative',
+                            }}>
+                              <span style={{ position: 'absolute', left: 0, color: '#8b5cf6', fontWeight: 700 }}>{idx + 1}.</span>
+                              {action}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
           {/* === AI GOVERNANCE INTELLIGENCE === */}
           <div className="glass-card" style={{ padding: 24, marginTop: 24, border: '1px solid rgba(139,92,246,0.3)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
               <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0 }}>🧠 AI Governance Intelligence</h3>
               <span style={{ fontSize: '0.68rem', background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>Gemini 2.5 Flash</span>
+              <button className="btn btn-secondary" onClick={runGovernanceIntelligence} disabled={govLoading} style={{ marginLeft: 'auto' }}>
+                {govLoading ? 'Running...' : 'Run Intelligence'}
+              </button>
             </div>
+
+            {!govLoading && !govIntel && (
+              <div style={{ marginBottom: 12, fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
+                Click <strong>Run Intelligence</strong> to generate the governance intelligence report on demand and reduce unnecessary API usage.
+              </div>
+            )}
 
             {govLoading && (
               <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-secondary)' }}>

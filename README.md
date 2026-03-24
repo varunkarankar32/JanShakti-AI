@@ -91,6 +91,22 @@ QWEN_PRIORITY_MAX_NEW_TOKENS=220
 
 If Qwen is unavailable on the machine, backend automatically falls back to deterministic heuristic scoring.
 
+### 3.1 Social Media Fact-Check Engine (Gemini-Free)
+The `/api/nlp/fact-check` endpoint now uses a Gemini-independent hybrid pipeline:
+
+- Google News RSS retrieval for recent coverage evidence
+- Source credibility weighting (reputable domain/publisher scoring)
+- Optional local NLI claim-vs-headline reasoning (`transformers` model) for support vs contradiction scoring
+
+Optional env config in [backend/.env](backend/.env):
+
+```env
+NEWS_VERIFIER_ENABLED=true
+NEWS_VERIFIER_MODEL=MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli
+```
+
+If `transformers` is not installed, the verifier still works with the RSS + credibility pipeline and reports `nli_status` in metadata.
+
 If speech transcription fails (missing ffmpeg or unsupported audio), API now returns an explicit error instead of demo/hardcoded text.
 For demo-only behavior, set `ALLOW_SIMULATED_TRANSCRIPTION=true` in [backend/.env](backend/.env).
 
@@ -117,6 +133,31 @@ ngrok http 8010
 ```
 
 Voice notes and image uploads sent in WhatsApp are auto-processed and filed as complaints.
+
+### 4.1 Admin Onboarding Portal (Leader + Authority)
+
+A dedicated Admin Portal is now available at:
+
+- Frontend route: `/admin`
+- Admin APIs: `/api/admin/*`
+
+Default admin bootstrap account (can be overridden in `backend/.env`):
+
+```env
+DEFAULT_ADMIN_NAME=System Admin
+DEFAULT_ADMIN_EMAIL=admin@janshakti.ai
+DEFAULT_ADMIN_PASSWORD=Admin@123
+```
+
+Admin capabilities:
+
+- Single onboarding for `authority`, `leader`, and `admin`
+- Mandatory onboarding geography capture: `state` and `district`
+- Bulk onboarding import (`name,email,phone,state,district,role,password` per row)
+- User directory search + role reassignment
+- Account activation/deactivation controls
+- Password reset workflows with forced re-login
+- Live onboarding metrics and recent account activity
 
 ### 5. Model Training (Optional)
 If you want to retrain custom models locally:
