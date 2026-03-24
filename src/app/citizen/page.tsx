@@ -107,6 +107,7 @@ type BrowserSpeechRecognition = {
   continuous: boolean;
   start: () => void;
   stop: () => void;
+  abort: () => void;
   onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
   onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
@@ -191,6 +192,18 @@ export default function CitizenPortal() {
   const [myComplaints, setMyComplaints] = useState<MyComplaint[]>([]);
   const [trackError, setTrackError] = useState('');
   const [backendOnline, setBackendOnline] = useState(false);
+
+  // AI Risk Score state (Gemini 2.5 Flash)
+  const [riskData, setRiskData] = useState<{
+    risk_score: number; risk_level: string; risk_factors: {factor: string; severity: string; description: string}[];
+    reasoning: string; urgency_hours: number; ai_model: string; public_safety_impact: string;
+    environmental_impact: string; affected_population: string; escalation_risk: string; ai_confidence: number;
+  } | null>(null);
+  const [riskLoading, setRiskLoading] = useState(false);
+  const [geminiImageData, setGeminiImageData] = useState<{
+    risk_score: number; risk_level: string; risk_factors: string[]; risk_reasoning: string;
+    visible_issues: string[]; recommended_action: string; severity: string;
+  } | null>(null);
 
   const [authMode, setAuthMode] = useState<'signup' | 'login'>('signup');
   const [authName, setAuthName] = useState('');
@@ -394,13 +407,15 @@ export default function CitizenPortal() {
     setPhotoExtractMessage('');
     setPhotoExtractSource('');
     setPhotoExtractModel('');
+    setGeminiImageData(null);
 
     try {
       const imageData = new FormData();
       imageData.append('image', photoFile);
       imageData.append('ward', ward || 'Ward 1');
 
-      const res = await fetch(`${API_BASE}/api/complaints/extract/image-only`, {
+      // Use Gemini 2.5 Flash for image analysis
+      const res = await fetch(`${API_BASE}/api/complaints/ai/analyze-image`, {
         method: 'POST',
         body: imageData,
       });
@@ -411,35 +426,51 @@ export default function CitizenPortal() {
       }
 
       const payload = await res.json();
-      const generatedDescription = String(
-        payload?.image_problem_description || payload?.description || ''
-      ).trim();
 
       if (payload?.source_media_path) {
         setPhotoMediaPath(String(payload.source_media_path));
       }
 
-      if (payload?.category) {
-        setCategory(String(payload.category));
-      }
-
-      const source = String(payload?.image_description_source || payload?.ai?.image_description_source || '').trim();
-      const model = String(payload?.image_description_model || payload?.ai?.image_description_model || '').trim();
-      setPhotoExtractSource(source);
-      setPhotoExtractModel(model);
-
-      if (generatedDescription) {
-        setDescription(generatedDescription);
-        if (source === 'qwen') {
-          setPhotoExtractMessage('Qwen generated the complaint description from your photo. You can edit it before submit.');
-        } else {
-          setPhotoExtractMessage('Photo analyzed and description generated using fallback AI logic. You can edit it before submit.');
-        }
+      if (payload?.success) {
+        const desc = String(payload.description || '').trim();
+        if (desc) setDescription(desc);
+        if (payload.category) setCategory(String(payload.category));
+        setPhotoExtractSource('gemini');
+        setPhotoExtractModel(payload.ai_model || 'Gemini 2.5 Flash');
+        setGeminiImageData({
+          risk_score: payload.risk_score || 0,
+          risk_level: payload.risk_level || 'Medium',
+          risk_factors: payload.risk_factors || [],
+          risk_reasoning: payload.risk_reasoning || '',
+          visible_issues: payload.visible_issues || [],
+          recommended_action: payload.recommended_action || '',
+          severity: payload.severity || 'medium',
+        });
+        setPhotoExtractMessage(
+          `✨ Gemini 2.5 Flash analyzed your photo — ${payload.severity?.toUpperCase()} severity, ` +
+          `Risk Score: ${Math.round(payload.risk_score || 0)}/100. You can edit the description below.`
+        );
       } else {
-        setPhotoExtractMessage('Image analyzed, but description could not be generated. Please add details manually.');
+        // Fallback to old endpoint
+        const fallbackRes = await fetch(`${API_BASE}/api/complaints/extract/image-only`, {
+          method: 'POST',
+          body: imageData,
+        });
+        if (fallbackRes.ok) {
+          const fb = await fallbackRes.json();
+          const fbDesc = String(fb?.image_problem_description || fb?.description || '').trim();
+          if (fbDesc) setDescription(fbDesc);
+          if (fb?.category) setCategory(String(fb.category));
+          if (fb?.source_media_path) setPhotoMediaPath(String(fb.source_media_path));
+          setPhotoExtractSource('fallback');
+          setPhotoExtractModel(fb?.image_description_model || 'Qwen');
+          setPhotoExtractMessage('Photo analyzed with fallback AI. You can edit the description below.');
+        } else {
+          setPhotoExtractMessage('Image analyzed, but description generation failed. Please add details manually.');
+        }
       }
     } catch {
-      setPhotoExtractMessage('Failed to contact image extraction service.');
+      setPhotoExtractMessage('Failed to contact Gemini AI image service.');
     } finally {
       setPhotoExtractLoading(false);
     }
@@ -506,7 +537,7 @@ export default function CitizenPortal() {
     }
   };
 
-  const startLiveDictation = () => {
+  const startLiveDictation = async () => {
     if (typeof window === 'undefined') return;
     const w = window as Window & {
       webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
@@ -514,42 +545,88 @@ export default function CitizenPortal() {
     };
     const SpeechRecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) {
-      setVoiceTranscribeError('Live dictation is not supported in this browser.');
+      setVoiceTranscribeError('Live dictation is not supported in this browser. Use Chrome or Edge.');
       return;
     }
 
     setVoiceTranscribeError('');
-    const recognition = new SpeechRecognitionCtor();
-    recognition.lang = 'en-IN';
-    recognition.interimResults = true;
-    recognition.continuous = true;
 
-    recognition.onresult = (event) => {
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i += 1) {
-        transcript += `${event.results[i][0].transcript} `;
-      }
-      const normalized = transcript.trim();
-      setVoiceTranscript(normalized);
-      setVoiceLanguage('Live Mic');
+    // Explicitly request microphone permission first — this is required on
+    // deployed HTTPS sites where the browser may not implicitly grant access.
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Release the stream immediately — we only need the permission grant.
+      stream.getTracks().forEach(t => t.stop());
+    } catch (micErr: unknown) {
+      const msg = micErr instanceof Error ? micErr.message : String(micErr);
+      setVoiceTranscribeError(
+        `Microphone access denied. Please allow microphone permission in your browser settings and try again. (${msg})`
+      );
+      return;
+    }
+
+    const maxRetries = 3;
+    let attempt = 0;
+
+    const tryStart = () => {
+      attempt += 1;
+      const recognition = new SpeechRecognitionCtor();
+      recognition.lang = 'en-IN';
+      recognition.interimResults = true;
+      recognition.continuous = true;
+
+      recognition.onresult = (event) => {
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i += 1) {
+          transcript += `${event.results[i][0].transcript} `;
+        }
+        const normalized = transcript.trim();
+        setVoiceTranscript(normalized);
+        setVoiceLanguage('Live Mic');
+      };
+
+      recognition.onerror = (event) => {
+        const err = event?.error || 'unknown';
+
+        // The 'network' error is often transient — retry automatically
+        if (err === 'network' && attempt < maxRetries) {
+          console.warn(`[SpeechRecognition] network error on attempt ${attempt}/${maxRetries}, retrying...`);
+          recognition.abort();
+          setTimeout(tryStart, 500);
+          return;
+        }
+
+        if (err === 'network') {
+          setVoiceTranscribeError(
+            'Live mic could not connect to speech servers. This can happen on some networks/browsers. ' +
+            'Try: 1) Refresh the page 2) Use Chrome or Edge 3) Check that your network allows Google Speech services. ' +
+            'Alternatively, use the "Upload Audio" option to transcribe a recorded file.'
+          );
+        } else if (err === 'not-allowed') {
+          setVoiceTranscribeError(
+            'Microphone access was denied. Please allow microphone permission in your browser settings (click the lock icon in the address bar).'
+          );
+        } else {
+          setVoiceTranscribeError(`Live transcription error: ${err}`);
+        }
+        setVoiceListening(false);
+        recognitionRef.current = null;
+      };
+
+      recognition.onend = () => {
+        setVoiceListening(false);
+        if (!description.trim() && voiceTranscript.trim()) {
+          setDescription(voiceTranscript.trim());
+        }
+        recognitionRef.current = null;
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setVoiceListening(true);
     };
 
-    recognition.onerror = (event) => {
-      const err = event?.error || 'unknown';
-      setVoiceTranscribeError(`Live transcription error: ${err}`);
-    };
-
-    recognition.onend = () => {
-      setVoiceListening(false);
-      if (!description.trim() && voiceTranscript.trim()) {
-        setDescription(voiceTranscript.trim());
-      }
-      recognitionRef.current = null;
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-    setVoiceListening(true);
+    tryStart();
   };
 
   const stopLiveDictation = () => {
@@ -702,7 +779,28 @@ export default function CitizenPortal() {
         const data = await res.json();
         setLastTicket(data.ticket_id);
         setSubmitted(true);
-        setTimeout(() => setSubmitted(false), 8000);
+
+        // Trigger Gemini AI Risk Assessment
+        setRiskLoading(true);
+        setRiskData(null);
+        try {
+          const riskRes = await fetch(`${API_BASE}/api/complaints/ai/risk-assessment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              description: finalDescription,
+              category: finalCategory,
+              ward: ward || 'Ward 1',
+              title: finalDescription.slice(0, 80),
+            }),
+          });
+          if (riskRes.ok) {
+            const risk = await riskRes.json();
+            if (risk?.success) setRiskData(risk);
+          }
+        } catch { /* risk assessment is non-blocking */ }
+        setRiskLoading(false);
+
         setDescription('');
         setCategory('');
         setWard('');
@@ -720,6 +818,7 @@ export default function CitizenPortal() {
         setPhotoExtractMessage('');
         setPhotoExtractSource('');
         setPhotoExtractModel('');
+        setGeminiImageData(null);
       } else {
         const detail = await parseErrorMessage(res);
         if (res.status === 401) {
@@ -1099,7 +1198,7 @@ export default function CitizenPortal() {
                             disabled={!photoFile || photoExtractLoading || submitting || inputProcessing}
                             style={{ marginTop: 10 }}
                           >
-                            {photoExtractLoading ? '⏳ Extracting with Qwen LLM...' : ' Extract with Qwen LLM'}
+                            {photoExtractLoading ? '⏳ Gemini 2.5 Flash analyzing...' : '✨ Analyze with Gemini 2.5 Flash'}
                           </button>
                           {photoExtractMessage && (
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 8 }}>
@@ -1108,13 +1207,31 @@ export default function CitizenPortal() {
                           )}
                           {photoExtractSource && (
                             <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                              <span className="chip" style={{ fontSize: '0.68rem' }}>
-                                Description Engine: {photoExtractSource === 'qwen' ? 'Qwen' : 'Fallback'}
+                              <span className="chip" style={{ fontSize: '0.68rem', background: photoExtractSource === 'gemini' ? 'rgba(59,130,246,0.15)' : undefined, color: photoExtractSource === 'gemini' ? '#60a5fa' : undefined }}>
+                                ✨ {photoExtractSource === 'gemini' ? 'Gemini 2.5 Flash' : 'Fallback AI'}
                               </span>
                               {photoExtractModel && (
                                 <span className="chip" style={{ fontSize: '0.68rem' }}>
                                   Model: {photoExtractModel}
                                 </span>
+                              )}
+                              {geminiImageData && (
+                                <span className="chip" style={{ fontSize: '0.68rem', background: geminiImageData.risk_level === 'Critical' ? 'rgba(239,68,68,0.15)' : geminiImageData.risk_level === 'High' ? 'rgba(249,115,22,0.15)' : geminiImageData.risk_level === 'Medium' ? 'rgba(234,179,8,0.15)' : 'rgba(34,197,94,0.15)', color: geminiImageData.risk_level === 'Critical' ? '#ef4444' : geminiImageData.risk_level === 'High' ? '#f97316' : geminiImageData.risk_level === 'Medium' ? '#eab308' : '#22c55e' }}>
+                                  Risk: {geminiImageData.risk_level} ({Math.round(geminiImageData.risk_score)}/100)
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {geminiImageData && geminiImageData.visible_issues && geminiImageData.visible_issues.length > 0 && (
+                            <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)' }}>
+                              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-blue-light)', marginBottom: 4 }}>🔍 AI DETECTED ISSUES</div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                {geminiImageData.visible_issues.map((issue, idx) => (
+                                  <span key={idx} style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: 12, background: 'rgba(59,130,246,0.1)', color: 'var(--text-secondary)' }}>{issue}</span>
+                                ))}
+                              </div>
+                              {geminiImageData.risk_reasoning && (
+                                <div style={{ marginTop: 6, fontSize: '0.74rem', color: 'var(--text-tertiary)' }}>💡 {geminiImageData.risk_reasoning}</div>
                               )}
                             </div>
                           )}
@@ -1152,17 +1269,117 @@ export default function CitizenPortal() {
 
                     {submitted && (
                       <div style={{
-                        marginTop: 16, padding: 16, borderRadius: 10,
-                        background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)',
+                        marginTop: 16, borderRadius: 14,
+                        background: 'linear-gradient(135deg, rgba(59,130,246,0.08) 0%, rgba(139,92,246,0.08) 100%)',
+                        border: '1px solid rgba(59,130,246,0.25)',
                         animation: 'fadeInUp 0.5s ease',
+                        overflow: 'hidden',
                       }}>
-                        <div style={{ fontWeight: 700, color: '#22c55e', marginBottom: 4 }}> Complaint Filed & AI Processed!</div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                          Your ticket ID: <strong style={{ color: 'var(--accent-blue-light)' }}>{lastTicket}</strong>
+                        {/* Header */}
+                        <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(59,130,246,0.15)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#22c55e', fontSize: '1rem' }}>✅ Complaint Filed & AI Processed!</div>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                              Ticket: <strong style={{ color: 'var(--accent-blue-light)' }}>{lastTicket}</strong>
+                            </div>
+                          </div>
+                          <div style={{ fontSize: '0.68rem', padding: '4px 10px', borderRadius: 20, background: 'rgba(59,130,246,0.12)', color: '#60a5fa', fontWeight: 600 }}>
+                            ✨ Powered by Gemini 2.5 Flash
+                          </div>
                         </div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginTop: 4 }}>
-                          AI auto-classified, priority-scored, and sentiments analyzed.
-                        </div>
+
+                        {/* Risk Score Card */}
+                        {riskLoading && (
+                          <div style={{ padding: 20, textAlign: 'center' }}>
+                            <div style={{ fontSize: '1.2rem', marginBottom: 8, animation: 'pulse 1.5s infinite' }}>🧠</div>
+                            <div style={{ fontSize: '0.82rem', color: 'var(--accent-blue-light)' }}>Gemini 2.5 Flash is assessing risk...</div>
+                          </div>
+                        )}
+                        {riskData && (
+                          <div style={{ padding: '16px 20px' }}>
+                            <div style={{ display: 'flex', gap: 20, alignItems: 'center', marginBottom: 16 }}>
+                              {/* Gauge */}
+                              <div style={{ position: 'relative', width: 90, height: 90, minWidth: 90 }}>
+                                <svg viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)', width: 90, height: 90 }}>
+                                  <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
+                                  <circle cx="50" cy="50" r="42" fill="none"
+                                    stroke={riskData.risk_level === 'Critical' ? '#ef4444' : riskData.risk_level === 'High' ? '#f97316' : riskData.risk_level === 'Medium' ? '#eab308' : '#22c55e'}
+                                    strokeWidth="8" strokeLinecap="round"
+                                    strokeDasharray={`${(riskData.risk_score / 100) * 264} 264`}
+                                    style={{ transition: 'stroke-dasharray 1.5s ease' }}
+                                  />
+                                </svg>
+                                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: riskData.risk_level === 'Critical' ? '#ef4444' : riskData.risk_level === 'High' ? '#f97316' : riskData.risk_level === 'Medium' ? '#eab308' : '#22c55e' }}>
+                                    {Math.round(riskData.risk_score)}
+                                  </div>
+                                  <div style={{ fontSize: '0.55rem', color: 'var(--text-tertiary)', fontWeight: 600 }}>RISK</div>
+                                </div>
+                              </div>
+
+                              {/* Details */}
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                                  <span style={{
+                                    padding: '3px 10px', borderRadius: 20, fontWeight: 700, fontSize: '0.78rem',
+                                    background: riskData.risk_level === 'Critical' ? 'rgba(239,68,68,0.15)' : riskData.risk_level === 'High' ? 'rgba(249,115,22,0.15)' : riskData.risk_level === 'Medium' ? 'rgba(234,179,8,0.15)' : 'rgba(34,197,94,0.15)',
+                                    color: riskData.risk_level === 'Critical' ? '#ef4444' : riskData.risk_level === 'High' ? '#f97316' : riskData.risk_level === 'Medium' ? '#eab308' : '#22c55e',
+                                  }}>
+                                    {riskData.risk_level === 'Critical' ? '🔴' : riskData.risk_level === 'High' ? '🟠' : riskData.risk_level === 'Medium' ? '🟡' : '🟢'} {riskData.risk_level} Risk
+                                  </span>
+                                  <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>⏱ Respond within {Math.round(riskData.urgency_hours || 24)}h</span>
+                                </div>
+                                {riskData.public_safety_impact && (
+                                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: 4 }}>🛡️ {riskData.public_safety_impact}</div>
+                                )}
+                                {riskData.affected_population && (
+                                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>👥 Affected: {riskData.affected_population}</div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Risk Factors */}
+                            {riskData.risk_factors && riskData.risk_factors.length > 0 && (
+                              <div style={{ marginBottom: 12 }}>
+                                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-blue-light)', marginBottom: 6, letterSpacing: 0.5 }}>⚠️ RISK FACTORS</div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                  {riskData.risk_factors.map((f, i) => (
+                                    <div key={i} style={{
+                                      padding: '4px 10px', borderRadius: 8, fontSize: '0.74rem',
+                                      background: f.severity === 'high' ? 'rgba(239,68,68,0.1)' : f.severity === 'medium' ? 'rgba(234,179,8,0.1)' : 'rgba(34,197,94,0.1)',
+                                      color: f.severity === 'high' ? '#ef4444' : f.severity === 'medium' ? '#eab308' : '#22c55e',
+                                      border: `1px solid ${f.severity === 'high' ? 'rgba(239,68,68,0.2)' : f.severity === 'medium' ? 'rgba(234,179,8,0.2)' : 'rgba(34,197,94,0.2)'}`,
+                                    }}>
+                                      {f.factor}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* AI Reasoning */}
+                            {riskData.reasoning && (
+                              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', padding: '8px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)' }}>
+                                💡 <strong>AI Reasoning:</strong> {riskData.reasoning}
+                              </div>
+                            )}
+
+                            {riskData.escalation_risk && (
+                              <div style={{ marginTop: 8, fontSize: '0.74rem', color: '#f97316', fontWeight: 600 }}>
+                                ⚡ If not addressed: {riskData.escalation_risk}
+                              </div>
+                            )}
+
+                            <div style={{ marginTop: 10, fontSize: '0.68rem', color: 'var(--text-tertiary)', textAlign: 'right' }}>
+                              AI Confidence: {Math.round((riskData.ai_confidence || 0.7) * 100)}%  •  {riskData.ai_model}
+                            </div>
+                          </div>
+                        )}
+                        {!riskLoading && !riskData && (
+                          <div style={{ padding: '12px 20px', fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
+                            AI auto-classified, priority-scored, and sentiments analyzed.
+                          </div>
+                        )}
                       </div>
                     )}
                   </>
@@ -1247,6 +1464,36 @@ export default function CitizenPortal() {
                         <div style={{ fontWeight: 600, textTransform: 'capitalize' }}>{trackedResult.status?.replace('_', ' ')}</div>
                       </div>
                     </div>
+
+                    {/* Gemini AI Risk Score Card (if available) */}
+                    {(() => {
+                      const tr = trackedResult as unknown as { ai_risk_score?: number; ai_risk_level?: string; ai_risk_reasoning?: string };
+                      if (tr?.ai_risk_score == null) return null;
+                      const rLevel = tr.ai_risk_level || 'Medium';
+                      const rScore = Math.round(tr.ai_risk_score || 0);
+                      const bgColor = rLevel === 'Critical' ? 'rgba(239,68,68,0.15)' : rLevel === 'High' ? 'rgba(249,115,22,0.15)' : rLevel === 'Medium' ? 'rgba(234,179,8,0.15)' : 'rgba(34,197,94,0.15)';
+                      const fgColor = rLevel === 'Critical' ? '#ef4444' : rLevel === 'High' ? '#f97316' : rLevel === 'Medium' ? '#eab308' : '#22c55e';
+                      return (
+                        <div style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.08) 0%, rgba(139,92,246,0.08) 100%)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 12, padding: 14, marginBottom: 16 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                            <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--accent-blue-light)' }}>🧠 GEMINI AI RISK ASSESSMENT</div>
+                            <span style={{ fontSize: '0.65rem', padding: '2px 8px', borderRadius: 12, background: 'rgba(59,130,246,0.12)', color: '#60a5fa' }}>✨ Gemini 2.5 Flash</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 10 }}>
+                            <div style={{ width: 52, height: 52, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: bgColor, fontSize: '1.1rem', fontWeight: 800, color: fgColor }}>
+                              {rScore}
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{rLevel} Risk</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>AI Risk Score: {rScore}/100</div>
+                            </div>
+                          </div>
+                          {tr.ai_risk_reasoning && (
+                            <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginBottom: 8 }}>💡 {tr.ai_risk_reasoning}</div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     <div style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 10, padding: 12, marginBottom: 16 }}>
                       <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--accent-blue-light)', marginBottom: 8 }}>AI TRIAGE BREAKDOWN</div>

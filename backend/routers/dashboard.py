@@ -9,7 +9,7 @@ from models.complaint import Complaint, ComplaintStatus, PriorityLevel
 from models.user import User
 from database import get_db
 from routers.auth import get_current_leader
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from services.priority_engine import priority_engine
 from services.civic_intelligence_service import civic_intelligence_service
 
@@ -23,7 +23,8 @@ def _unresponded_hours(complaint: Complaint) -> float:
         return 0.0
     if not complaint.created_at:
         return 0.0
-    return max(0.0, (datetime.now() - complaint.created_at).total_seconds() / 3600.0)
+    created = complaint.created_at if complaint.created_at.tzinfo else complaint.created_at.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - created).total_seconds() / 3600.0)
 
 
 def _effective_priority_snapshot(complaint: Complaint):
@@ -69,7 +70,7 @@ def _avg_resolution_days(db: Session) -> float:
 
 
 def _trend_data(db: Session, weeks: int = 8):
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     result = []
 
     for idx in range(weeks):
@@ -213,7 +214,7 @@ def _trust_index(resolution_rate: float, avg_rating: float, avg_response_days: f
 def _compose_dashboard_payload(db: Session):
     total = db.query(Complaint).count()
     resolved = db.query(Complaint).filter(Complaint.status == ComplaintStatus.RESOLVED).count()
-    today_start = datetime.now().replace(hour=0, minute=0, second=0)
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)
 
     complaints_today = db.query(Complaint).filter(Complaint.created_at >= today_start).count()
     resolved_today = db.query(Complaint).filter(
@@ -263,7 +264,7 @@ def _compose_dashboard_payload(db: Session):
     urgent_complaints = (
         db.query(Complaint)
         .filter(Complaint.status != ComplaintStatus.RESOLVED)
-        .order_by(Complaint.created_at.desc())
+        .order_by(Complaint.ai_score.desc(), Complaint.created_at.desc())
         .limit(200)
         .all()
     )
@@ -301,7 +302,7 @@ def _compose_dashboard_payload(db: Session):
             "starvation_bonus": row["starvation_bonus"],
             "unresponded_hours": round(row["unresponded_hours"], 1),
         }
-        for i, row in enumerate(ranked_urgent[:5])
+        for i, row in enumerate(ranked_urgent[:15])
     ]
 
     trend_data = _trend_data(db, weeks=8)
@@ -381,3 +382,156 @@ def get_civic_intelligence(db: Session = Depends(get_db)):
         "fact_checks": payload.get("fact_checks", []),
         "starvation_watch": payload.get("starvation_watch", {}),
     }
+
+
+@router.get("/social-pulse")
+async def get_social_pulse(db: Session = Depends(get_db)):
+    """
+    🧠 Gemini 2.5 Flash — AI Social Sentiment Intelligence.
+    Analyzes complaint patterns to generate social-media-like sentiment report.
+    """
+    from services.gemini_ai_service import gemini_ai_service
+
+    all_complaints = (
+        db.query(Complaint)
+        .order_by(Complaint.created_at.desc())
+        .limit(100)
+        .all()
+    )
+
+    complaint_summaries = [
+        f"[{c.category or 'General'}] {c.ward or 'Unknown'}: {(c.description or c.title or '')[:120]}"
+        for c in all_complaints[:25]
+    ]
+
+    total = len(all_complaints)
+    resolved = sum(1 for c in all_complaints if c.status == ComplaintStatus.RESOLVED)
+    p0 = sum(1 for c in all_complaints if c.priority == PriorityLevel.P0)
+    open_count = sum(1 for c in all_complaints if c.status == ComplaintStatus.OPEN)
+
+    ward_stats = {
+        "total_complaints": total,
+        "resolved": resolved,
+        "open": open_count,
+        "p0_active": p0,
+        "resolution_rate": round((resolved / total * 100) if total > 0 else 0, 1),
+    }
+
+    result = await gemini_ai_service.analyze_social_sentiment(
+        complaint_summaries=complaint_summaries,
+        ward_stats=ward_stats,
+    )
+
+    return result
+
+
+@router.get("/trust-indicators")
+def get_trust_indicators(db: Session = Depends(get_db)):
+    """
+    Public Trust Indicators — 5 trust metrics computed from complaint data.
+    """
+    total = db.query(Complaint).count()
+    resolved = db.query(Complaint).filter(Complaint.status == ComplaintStatus.RESOLVED).count()
+    p0_active = db.query(Complaint).filter(
+        Complaint.priority == PriorityLevel.P0,
+        Complaint.status != ComplaintStatus.RESOLVED,
+    ).count()
+
+    avg_rating_result = db.query(func.avg(Complaint.rating)).filter(Complaint.rating.isnot(None)).scalar()
+    avg_rating = float(avg_rating_result) if avg_rating_result else 3.5
+
+    avg_response_days = _avg_resolution_days(db)
+    resolution_rate = round((resolved / total * 100) if total > 0 else 0, 1)
+
+    # 1. Response Quality (based on authority responses)
+    with_response = db.query(Complaint).filter(
+        Complaint.authority_response.isnot(None),
+    ).count()
+    response_quality = round(min(100, (with_response / max(1, total)) * 100 * 1.5), 1)
+
+    # 2. Resolution Speed (inverse of avg days)
+    resolution_speed = round(max(0, 100 - (avg_response_days * 10)), 1)
+
+    # 3. Transparency (complaints with updates/feedback)
+    with_updates = db.query(Complaint).filter(
+        (Complaint.citizen_update.isnot(None)) | (Complaint.leader_note.isnot(None))
+    ).count()
+    transparency = round(min(100, (with_updates / max(1, total)) * 100 * 2), 1)
+
+    # 4. Citizen Satisfaction (from ratings)
+    satisfaction = round(min(100, (avg_rating / 5.0) * 100), 1)
+
+    # 5. Escalation Risk (inverse of P0 ratio)
+    p0_ratio = p0_active / max(1, total)
+    escalation_risk = round(max(0, 100 - (p0_ratio * 500)), 1)
+
+    # Overall trust score
+    overall = round(
+        response_quality * 0.20 +
+        resolution_speed * 0.20 +
+        transparency * 0.15 +
+        satisfaction * 0.25 +
+        escalation_risk * 0.20,
+        1
+    )
+
+    return {
+        "overall_trust_score": overall,
+        "indicators": [
+            {"name": "Response Quality", "score": response_quality, "icon": "📋", "color": "#3b82f6"},
+            {"name": "Resolution Speed", "score": resolution_speed, "icon": "⚡", "color": "#22c55e"},
+            {"name": "Transparency", "score": transparency, "icon": "🔍", "color": "#8b5cf6"},
+            {"name": "Citizen Satisfaction", "score": satisfaction, "icon": "😊", "color": "#f59e0b"},
+            {"name": "Escalation Risk", "score": escalation_risk, "icon": "🛡️", "color": "#ef4444"},
+        ],
+        "resolution_rate": resolution_rate,
+        "avg_response_days": avg_response_days,
+        "total_complaints": total,
+        "resolved": resolved,
+        "p0_active": p0_active,
+    }
+
+
+@router.post("/governance-intelligence")
+async def analyze_governance_intelligence(
+    tweets: list[dict] | None = None,
+    region: str = "Municipal Region",
+    db: Session = Depends(get_db),
+):
+    """
+    🧠 Gemini 2.5 Flash — Full Governance Intelligence Analysis from social media posts.
+    Covers: issue detection, sentiment, urgency scoring, viral detection, misinformation check,
+    geo-tag inference, actionable insights, AI public responses, and leader summary.
+    If no tweets provided, generates simulated tweets from complaint data.
+    """
+    from services.gemini_ai_service import gemini_ai_service
+
+    if not tweets:
+        # Generate simulated tweets from recent complaint data
+        recent = (
+            db.query(Complaint)
+            .order_by(Complaint.created_at.desc())
+            .limit(30)
+            .all()
+        )
+        tweets = []
+        for i, c in enumerate(recent):
+            desc = (c.description or c.title or "civic issue")[:120]
+            ward = c.ward or "Unknown"
+            cat = c.category or "General"
+            tweets.append({
+                "text": f"{desc} — problem in {ward} ({cat}) needs urgent attention! @municipalcorp",
+                "username": f"citizen_{i+1}",
+                "timestamp": (c.created_at.isoformat() if c.created_at else "recent"),
+                "location": ward,
+            })
+
+    if not tweets:
+        return {"success": False, "error": "No social media data available"}
+
+    result = await gemini_ai_service.analyze_governance_intelligence(
+        tweets=tweets,
+        region=region,
+    )
+
+    return result

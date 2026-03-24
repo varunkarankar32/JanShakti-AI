@@ -3,7 +3,7 @@ Report Generator Service — AI-generated weekly reports for ward officers.
 Compiles complaint data, resolution rates, citizen feedback into structured reports.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Dict, Optional, Tuple
 from sqlalchemy.orm import Session
@@ -17,7 +17,7 @@ class ReportService:
         date_from: Optional[str],
         date_to: Optional[str],
     ) -> Tuple[datetime, datetime]:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         if date_to:
             end_date = datetime.fromisoformat(date_to)
@@ -210,8 +210,8 @@ class ReportService:
     def generate_fallback_report(self, ward: str) -> Dict:
         """Generate a demo report when no DB data is available."""
         stats = {
-            "date_from": (datetime.now() - timedelta(days=7)).date().isoformat(),
-            "date_to": datetime.now().date().isoformat(),
+            "date_from": (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat(),
+            "date_to": datetime.now(timezone.utc).date().isoformat(),
             "issues_raised": 46,
             "issues_solved": 23,
             "in_progress": 8,
@@ -234,7 +234,7 @@ class ReportService:
             "input_mix": {"text": 18, "voice": 15, "photo": 13},
         }
 
-        period = f"{(datetime.now() - timedelta(days=7)).strftime('%b %d')} — {datetime.now().strftime('%b %d, %Y')}"
+        period = f"{(datetime.now(timezone.utc) - timedelta(days=7)).strftime('%b %d')} — {datetime.now(timezone.utc).strftime('%b %d, %Y')}"
         report_text = self._format_report(ward, period, stats)
 
         return {

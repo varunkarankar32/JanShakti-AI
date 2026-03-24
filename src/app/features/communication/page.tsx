@@ -32,7 +32,27 @@ type ReportStats = {
   stale_over_72h?: number;
 };
 
+type CommResult = {
+  success: boolean;
+  comm_type?: string;
+  title?: string;
+  content?: string;
+  key_points?: string[];
+  tone?: string;
+  target_audience?: string;
+  hashtags?: string[];
+  ai_model?: string;
+  error?: string;
+};
+
 const formatDate = (d: Date) => d.toISOString().slice(0, 10);
+
+const COMM_TYPES = [
+  { id: 'press_release', label: '📰 Press Release', desc: 'Formal official statement' },
+  { id: 'social_post', label: '🐦 Social Post', desc: 'Twitter/X ready posts' },
+  { id: 'citizen_advisory', label: '⚠️ Citizen Advisory', desc: 'Public safety notice' },
+  { id: 'awareness_campaign', label: '📢 Campaign', desc: 'Awareness drive' },
+];
 
 export default function CommunicationPage() {
   const [ward, setWard] = useState('Ward 1');
@@ -48,6 +68,15 @@ export default function CommunicationPage() {
   const [ticketLoading, setTicketLoading] = useState(false);
   const [ticketError, setTicketError] = useState('');
 
+  // AI Communication Studio state
+  const [commType, setCommType] = useState('press_release');
+  const [commWard, setCommWard] = useState('Ward 1');
+  const [commCategory, setCommCategory] = useState('Roads & Potholes');
+  const [commContext, setCommContext] = useState('');
+  const [commResult, setCommResult] = useState<CommResult | null>(null);
+  const [commLoading, setCommLoading] = useState(false);
+  const [commCopied, setCommCopied] = useState(false);
+
   const generateReport = async () => {
     setReportLoading(true);
     setReportError('');
@@ -58,24 +87,19 @@ export default function CommunicationPage() {
       const res = await fetch(`${API_BASE}/api/reports/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ward,
-          date_from: dateFrom,
-          date_to: dateTo,
-        }),
+        body: JSON.stringify({ ward, date_from: dateFrom, date_to: dateTo }),
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setReportError(data?.detail || 'Failed to generate report');
+        setReportError('Failed to generate report');
         return;
       }
 
       const data = await res.json();
-      setReport(data.report_text || 'No report text returned');
-      setReportStats((data.stats || null) as ReportStats | null);
+      setReport(data.report || '');
+      setReportStats(data.stats || null);
     } catch {
-      setReportError('Unable to connect to report service');
+      setReportError('Unable to reach backend');
     } finally {
       setReportLoading(false);
     }
@@ -103,6 +127,42 @@ export default function CommunicationPage() {
     }
   };
 
+  const generateCommunication = async () => {
+    setCommLoading(true);
+    setCommResult(null);
+    setCommCopied(false);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/complaints/ai/generate-communication`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          comm_type: commType,
+          ward: commWard,
+          category: commCategory,
+          context: commContext,
+          total_complaints: 50,
+          resolved: 30,
+          pending: 20,
+          p0_active: 3,
+        }),
+      });
+
+      const data = await res.json();
+      setCommResult(data);
+    } catch {
+      setCommResult({ success: false, error: 'Unable to reach AI service' });
+    } finally {
+      setCommLoading(false);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCommCopied(true);
+    setTimeout(() => setCommCopied(false), 2000);
+  };
+
   return (
     <main className="main-content">
       <section className="section" style={{ paddingTop: 80 }}>
@@ -110,8 +170,119 @@ export default function CommunicationPage() {
           <div className="section-label">CHAPTER 08</div>
           <h1 className="section-title">AI Communication Engine</h1>
           <p className="section-subtitle" style={{ marginBottom: 40 }}>
-            Auto-generated ward reports and transparent citizen communication from live complaint data
+            Auto-generated ward reports, transparent citizen communication, and AI-powered public communications
           </p>
+
+          {/* AI Communication Studio */}
+          <div className="glass-card" style={{ padding: 24, marginBottom: 24, border: '1px solid rgba(139,92,246,0.3)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>✨ AI Communication Studio</h3>
+              <span style={{ fontSize: '0.68rem', background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>Gemini 2.5 Flash</span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 14 }}>
+              {COMM_TYPES.map((ct) => (
+                <button
+                  key={ct.id}
+                  onClick={() => setCommType(ct.id)}
+                  style={{
+                    padding: '10px 8px',
+                    borderRadius: 10,
+                    border: commType === ct.id ? '2px solid #8b5cf6' : '1px solid var(--border-subtle)',
+                    background: commType === ct.id ? 'rgba(139,92,246,0.1)' : 'var(--bg-tertiary)',
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{ct.label}</div>
+                  <div style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', marginTop: 2 }}>{ct.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 10, marginBottom: 12 }}>
+              <div className="form-group">
+                <label className="form-label">Ward</label>
+                <input className="form-input" value={commWard} onChange={(e) => setCommWard(e.target.value)} placeholder="Ward 1" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Category</label>
+                <select className="form-input" value={commCategory} onChange={(e) => setCommCategory(e.target.value)}>
+                  {['Roads & Potholes', 'Garbage & Sanitation', 'Water Supply', 'Drainage', 'Electricity', 'Safety & Security', 'Others'].map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Context (optional)</label>
+                <input className="form-input" value={commContext} onChange={(e) => setCommContext(e.target.value)} placeholder="E.g., Recent flooding in Ward 3..." />
+              </div>
+            </div>
+
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%', justifyContent: 'center', background: 'linear-gradient(135deg, #8b5cf6, #6366f1)' }}
+              onClick={generateCommunication}
+              disabled={commLoading}
+            >
+              {commLoading ? '🧠 Generating with Gemini AI...' : '✨ Generate AI Communication'}
+            </button>
+
+            {commResult && commResult.success && (
+              <div style={{ marginTop: 16, border: '1px solid rgba(139,92,246,0.2)', borderRadius: 12, padding: 16, background: 'rgba(139,92,246,0.04)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '1rem' }}>{commResult.title}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                      {commResult.tone} • {commResult.target_audience} • {commResult.ai_model}
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.72rem', padding: '4px 10px' }}
+                    onClick={() => copyToClipboard(commResult.content || '')}
+                  >
+                    {commCopied ? '✅ Copied!' : '📋 Copy'}
+                  </button>
+                </div>
+
+                <pre style={{
+                  whiteSpace: 'pre-wrap',
+                  fontSize: '0.78rem',
+                  lineHeight: 1.6,
+                  background: 'var(--bg-primary)',
+                  borderRadius: 8,
+                  padding: 12,
+                  border: '1px solid var(--border-subtle)',
+                  marginBottom: 10,
+                }}>
+                  {commResult.content}
+                </pre>
+
+                {commResult.key_points && commResult.key_points.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 600, marginBottom: 4 }}>Key Points:</div>
+                    {commResult.key_points.map((p, i) => (
+                      <div key={i} style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', paddingLeft: 10 }}>• {p}</div>
+                    ))}
+                  </div>
+                )}
+
+                {commResult.hashtags && commResult.hashtags.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {commResult.hashtags.map((h, i) => (
+                      <span key={i} style={{ fontSize: '0.68rem', background: 'rgba(59,130,246,0.1)', color: '#3b82f6', padding: '2px 8px', borderRadius: 10 }}>{h}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {commResult && !commResult.success && (
+              <div style={{ marginTop: 10, color: '#dc2626', fontSize: '0.82rem' }}>❌ {commResult.error}</div>
+            )}
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24 }}>
             <div className="glass-card" style={{ padding: 24 }}>
@@ -227,3 +398,4 @@ export default function CommunicationPage() {
     </main>
   );
 }
+

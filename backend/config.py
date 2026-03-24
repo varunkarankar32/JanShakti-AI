@@ -6,7 +6,33 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./janshakti.db")
+def _fix_db_url(url: str) -> str:
+    if not url:
+        return url
+    
+    # SQLAlchemy requires 'postgresql://' instead of 'postgres://'
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+        
+    # Fix unescaped '@' or other symbols in passwords (e.g. Supabase passwords)
+    if url.startswith("postgresql://") and url.count("@") > 1:
+        import urllib.parse
+        prefix, host_part = url.rsplit("@", 1)
+        parts = prefix.split("://", 1)
+        if len(parts) == 2:
+            scheme, auth_part = parts
+            if ":" in auth_part:
+                user, password = auth_part.split(":", 1)
+                password = urllib.parse.quote(password)
+                url = f"{scheme}://{user}:{password}@{host_part}"
+                
+    # Fix IPv6 Supabase connection dropping in Render: Switch to connection pooler (IPv4)
+    if "supabase.co" in url and ":5432" in url:
+        url = url.replace(":5432", ":6543")
+        
+    return url
+
+DATABASE_URL = _fix_db_url(os.getenv("DATABASE_URL", "sqlite:///./janshakti.db"))
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")  # tiny, base, small, medium, large
 YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "ml/weights/yolov8_damage.pt")
 CLASSIFIER_MODEL_PATH = os.getenv("CLASSIFIER_MODEL_PATH", "ml/weights/classifier.pkl")

@@ -1,5 +1,7 @@
+import logging
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.exc import OperationalError
 from config import (
     DATABASE_URL,
     DEFAULT_LEADER_NAME,
@@ -10,18 +12,42 @@ from config import (
     DEFAULT_AUTHORITY_PASSWORD,
 )
 
-IS_SQLITE = DATABASE_URL.startswith("sqlite")
+logger = logging.getLogger(__name__)
 
-engine_kwargs = {"pool_pre_ping": True}
-if IS_SQLITE:
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
+FALLBACK_SQLITE_URL = "sqlite:///./janshakti.db"
 
-engine = create_engine(DATABASE_URL, **engine_kwargs)
+
+def _build_engine(url: str):
+    """Create a SQLAlchemy engine for the given URL."""
+    is_sqlite = url.startswith("sqlite")
+    kwargs = {"pool_pre_ping": True}
+    if is_sqlite:
+        kwargs["connect_args"] = {"check_same_thread": False}
+    else:
+        kwargs["connect_args"] = {"connect_timeout": 10}
+        kwargs["pool_recycle"] = 300
+        kwargs["pool_size"] = 5
+        kwargs["max_overflow"] = 10
+    return create_engine(url, **kwargs), is_sqlite
+
+
+# --- Build initial engine ---------------------------------------------------
+_active_url = DATABASE_URL
+engine, IS_SQLITE = _build_engine(_active_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 class Base(DeclarativeBase):
     pass
+
+
+def _switch_to_sqlite():
+    """Fall back to a local SQLite database when PostgreSQL is unreachable."""
+    global engine, SessionLocal, IS_SQLITE, _active_url  # noqa: PLW0603
+    print("[DB] ⚠️  PostgreSQL unreachable — falling back to local SQLite database")
+    _active_url = FALLBACK_SQLITE_URL
+    engine, IS_SQLITE = _build_engine(FALLBACK_SQLITE_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def get_db():
@@ -33,10 +59,8 @@ def get_db():
 
 
 def _ensure_user_role_column():
-    # Lightweight migration for existing SQLite DBs created before role support.
     if not IS_SQLITE:
         return
-
     with engine.connect() as conn:
         result = conn.execute(text("PRAGMA table_info(users)"))
         columns = [row[1] for row in result.fetchall()]
@@ -46,7 +70,6 @@ def _ensure_user_role_column():
 
 
 def _ensure_complaint_workflow_columns():
-    # Lightweight migration for existing SQLite DBs before workflow fields.
     if not IS_SQLITE:
         return
 
@@ -135,8 +158,69 @@ def _seed_default_authority():
 
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
-    _ensure_user_role_column()
-    _ensure_complaint_workflow_columns()
-    _seed_default_leader()
-    _seed_default_authority()
+    """Initialize database tables. If PostgreSQL is unreachable,
+    automatically fall back to a local SQLite database so the app
+    can still start and serve requests."""
+    try:
+        Base.metadata.create_all(bind=engine)
+    except (OperationalError, Exception) as exc:
+        if not IS_SQLITE:
+            print(f"[DB] PostgreSQL connection failed: {exc}")
+            _switch_to_sqlite()
+            # Retry with SQLite
+            Base.metadata.create_all(bind=engine)
+        else:
+            raise
+
+    try:
+        if IS_SQLITE:
+            _ensure_user_role_column()
+            _ensure_complaint_workflow_columns()
+        else:
+            _ensure_pg_complaint_columns()
+        _seed_default_leader()
+        _seed_default_authority()
+        print(f"[DB] ✅ Database initialized successfully (using {'SQLite' if IS_SQLITE else 'PostgreSQL'})")
+    except Exception as exc:
+        print(f"[DB] Warning — seeding/migration issue (non-fatal): {exc}")
+
+
+def _ensure_pg_complaint_columns():
+    """Add any missing columns to the complaints table in PostgreSQL."""
+    required_columns = {
+        "ai_risk_score": "FLOAT",
+        "ai_risk_level": "VARCHAR",
+        "ai_risk_factors": "TEXT",
+        "ai_risk_reasoning": "TEXT",
+        "ai_leader_brief": "TEXT",
+        "citizen_language": "VARCHAR",
+        "image_path": "VARCHAR",
+        "audio_path": "VARCHAR",
+        "assigned_authority": "VARCHAR",
+        "authority_email": "VARCHAR",
+        "leader_note": "TEXT",
+        "authority_response": "TEXT",
+        "citizen_update": "TEXT",
+        "ai_breakdown": "TEXT",
+        "ai_explanation": "TEXT",
+        "ai_model_version": "VARCHAR",
+        "before_meta": "TEXT",
+        "after_meta": "TEXT",
+        "verification_score": "FLOAT",
+        "verification_confidence": "FLOAT",
+    }
+
+    with engine.connect() as conn:
+        result = conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'complaints'"
+        ))
+        existing = {row[0] for row in result.fetchall()}
+
+        for name, col_type in required_columns.items():
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE complaints ADD COLUMN {name} {col_type}"))
+                print(f"[DB] Added missing column: complaints.{name}")
+
+        conn.commit()
+
