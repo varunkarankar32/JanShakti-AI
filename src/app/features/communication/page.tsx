@@ -177,7 +177,7 @@ export default function CommunicationPage() {
           <div className="glass-card" style={{ padding: 24, marginBottom: 24, border: '1px solid rgba(139,92,246,0.3)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>✨ AI Communication Studio</h3>
-              <span style={{ fontSize: '0.68rem', background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>Gemini 2.5 Flash</span>
+              <span style={{ fontSize: '0.68rem', background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>Vision Transformer</span>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 14 }}>
@@ -226,7 +226,7 @@ export default function CommunicationPage() {
               onClick={generateCommunication}
               disabled={commLoading}
             >
-              {commLoading ? '🧠 Generating with Gemini AI...' : '✨ Generate AI Communication'}
+              {commLoading ? '🧠 Generating with Vision Transformer...' : '✨ Generate AI Communication'}
             </button>
 
             {commResult && commResult.success && (

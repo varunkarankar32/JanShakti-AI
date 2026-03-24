@@ -208,7 +208,7 @@ export default function CitizenPortal() {
   const [trackError, setTrackError] = useState('');
   const [backendOnline, setBackendOnline] = useState(false);
 
-  // AI Risk Score state (Gemini 2.5 Flash)
+  // AI Risk Score state (Vision Transformer)
   const [riskData, setRiskData] = useState<{
     risk_score: number; risk_level: string; risk_factors: {factor: string; severity: string; description: string}[];
     reasoning: string; urgency_hours: number; ai_model: string; public_safety_impact: string;
@@ -456,7 +456,7 @@ export default function CitizenPortal() {
       imageData.append('image', photoFile);
       imageData.append('ward', locationWard);
 
-      // Use Gemini 2.5 Flash for image analysis
+      // Use Vision Transformer for image analysis
       const res = await fetch(`${API_BASE}/api/complaints/ai/analyze-image`, {
         method: 'POST',
         body: imageData,
@@ -478,7 +478,7 @@ export default function CitizenPortal() {
         if (desc) setDescription(desc);
         if (payload.category) setCategory(String(payload.category));
         setPhotoExtractSource('gemini');
-        setPhotoExtractModel(payload.ai_model || 'Gemini 2.5 Flash');
+        setPhotoExtractModel(payload.ai_model || 'Vision Transformer');
         setGeminiImageData({
           risk_score: payload.risk_score || 0,
           risk_level: payload.risk_level || 'Medium',
@@ -489,7 +489,7 @@ export default function CitizenPortal() {
           severity: payload.severity || 'medium',
         });
         setPhotoExtractMessage(
-          `✨ Gemini 2.5 Flash analyzed your photo — ${payload.severity?.toUpperCase()} severity, ` +
+          `✨ Vision Transformer analyzed your photo — ${payload.severity?.toUpperCase()} severity, ` +
           `Risk Score: ${Math.round(payload.risk_score || 0)}/100. You can edit the description below.`
         );
       } else {
@@ -1281,7 +1281,7 @@ export default function CitizenPortal() {
                             disabled={!photoFile || photoExtractLoading || submitting || inputProcessing}
                             style={{ marginTop: 10 }}
                           >
-                            {photoExtractLoading ? '⏳ Gemini 2.5 Flash analyzing...' : '✨ Analyze with Gemini 2.5 Flash'}
+                            {photoExtractLoading ? '⏳ Vision Transformer analyzing...' : '✨ Analyze with Vision Transformer'}
                           </button>
                           {photoExtractMessage && (
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 8 }}>
@@ -1291,7 +1291,7 @@ export default function CitizenPortal() {
                           {photoExtractSource && (
                             <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                               <span className="chip" style={{ fontSize: '0.68rem', background: photoExtractSource === 'gemini' ? 'rgba(59,130,246,0.15)' : undefined, color: photoExtractSource === 'gemini' ? '#60a5fa' : undefined }}>
-                                ✨ {photoExtractSource === 'gemini' ? 'Gemini 2.5 Flash' : 'Fallback AI'}
+                                ✨ {photoExtractSource === 'gemini' ? 'Vision Transformer' : 'Fallback AI'}
                               </span>
                               {photoExtractModel && (
                                 <span className="chip" style={{ fontSize: '0.68rem' }}>
@@ -1367,7 +1367,7 @@ export default function CitizenPortal() {
                             </div>
                           </div>
                           <div style={{ fontSize: '0.68rem', padding: '4px 10px', borderRadius: 20, background: 'rgba(59,130,246,0.12)', color: '#60a5fa', fontWeight: 600 }}>
-                            ✨ Powered by Gemini 2.5 Flash
+                            ✨ Powered by Vision Transformer
                           </div>
                         </div>
 
@@ -1375,7 +1375,7 @@ export default function CitizenPortal() {
                         {riskLoading && (
                           <div style={{ padding: 20, textAlign: 'center' }}>
                             <div style={{ fontSize: '1.2rem', marginBottom: 8, animation: 'pulse 1.5s infinite' }}>🧠</div>
-                            <div style={{ fontSize: '0.82rem', color: 'var(--accent-blue-light)' }}>Gemini 2.5 Flash is assessing risk...</div>
+                            <div style={{ fontSize: '0.82rem', color: 'var(--accent-blue-light)' }}>Vision Transformer is assessing risk...</div>
                           </div>
                         )}
                         {riskData && (
@@ -1560,7 +1560,7 @@ export default function CitizenPortal() {
                         <div style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.08) 0%, rgba(139,92,246,0.08) 100%)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 12, padding: 14, marginBottom: 16 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                             <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--accent-blue-light)' }}>🧠 GEMINI AI RISK ASSESSMENT</div>
-                            <span style={{ fontSize: '0.65rem', padding: '2px 8px', borderRadius: 12, background: 'rgba(59,130,246,0.12)', color: '#60a5fa' }}>✨ Gemini 2.5 Flash</span>
+                            <span style={{ fontSize: '0.65rem', padding: '2px 8px', borderRadius: 12, background: 'rgba(59,130,246,0.12)', color: '#60a5fa' }}>✨ Vision Transformer</span>
                           </div>
                           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 10 }}>
                             <div style={{ width: 52, height: 52, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: bgColor, fontSize: '1.1rem', fontWeight: 800, color: fgColor }}>

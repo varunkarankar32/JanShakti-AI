@@ -153,17 +153,17 @@ export default function HomePage() {
             <Link href="/citizen" className="btn btn-primary" style={{ padding: '12px 28px', fontSize: '0.95rem' }}>File a Complaint</Link>
             <Link href="/dashboard" className="btn btn-secondary" style={{ padding: '12px 28px', fontSize: '0.95rem' }}>Leader Dashboard</Link>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 16, maxWidth: 600 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 16, maxWidth: 400 }}>
             {[
-              { val: 73, suf: '%', label: 'grievances unresolved' },
-              { val: 18, suf: ' days', label: 'avg complaint time' },
-              { val: 3, suf: '.8L Cr', label: 'lost to poor governance' },
+              { logo: 'images/sankalp_logo.png', alt: 'SANKALP logo', label: 'AI prioritization' },
+              { logo: 'images/education_ministry_logo.png', alt: 'Ministry of Education', label: 'multi-modal intake' },
             ].map((s, i) => (
               <div key={i} style={{ background: 'rgba(255,255,255,0.96)', border: '1px solid #E2E8F0', borderRadius: 10, padding: 16, textAlign: 'center', boxShadow: 'var(--shadow-sm)' }}>
-                <div style={{ fontSize: 'clamp(1.5rem, 3vw, 2.2rem)', fontWeight: 800, fontFamily: 'Outfit', color: 'var(--accent-blue)' }}>
-                  {i === 2 ? '₹' : ''}<AnimatedCounter end={s.val} suffix={s.suf} />
-                </div>
-                <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: 4 }}>{s.label}</div>
+                <img
+                  src={s.logo}
+                  alt={s.alt}
+                  style={{ width: 'auto', maxWidth: '100%', height: 56, objectFit: 'contain', margin: '0 auto 8px auto', display: 'block' }}
+                />
               </div>
             ))}
           </div>

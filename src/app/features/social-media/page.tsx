@@ -797,7 +797,7 @@ export default function SocialMediaPage() {
           <div className="glass-card" style={{ padding: 24, marginTop: 24, border: '1px solid rgba(139,92,246,0.3)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
               <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0 }}>🧠 AI Governance Intelligence</h3>
-              <span style={{ fontSize: '0.68rem', background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>Gemini 2.5 Flash</span>
+              <span style={{ fontSize: '0.68rem', background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', color: '#fff', padding: '2px 8px', borderRadius: 12, fontWeight: 600 }}>Vision Transformer</span>
               <button className="btn btn-secondary" onClick={runGovernanceIntelligence} disabled={govLoading} style={{ marginLeft: 'auto' }}>
                 {govLoading ? 'Running...' : 'Run Intelligence'}
               </button>
@@ -812,7 +812,7 @@ export default function SocialMediaPage() {
             {govLoading && (
               <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-secondary)' }}>
                 <div style={{ fontSize: '1.5rem', marginBottom: 8, animation: 'pulse 2s infinite' }}>🧠</div>
-                Analyzing social signals with Gemini AI...
+                Analyzing social signals with Vision Transformer...
               </div>
             )}
 
