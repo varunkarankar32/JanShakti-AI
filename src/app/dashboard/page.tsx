@@ -665,18 +665,11 @@ export default function DashboardPage() {
         }}>
           <div style={{ padding: '8px 12px', fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: 2, marginBottom: 8 }}>COMMAND CENTER</div>
           {[
-<<<<<<< HEAD
             { key: 'overview', icon: '📊', label: 'Overview' },
             { key: 'complaints', icon: '📋', label: 'All Complaints' },
             { key: 'alerts', icon: '🚨', label: 'Smart Alerts' },
             { key: 'actions', icon: '📝', label: 'Action Queue' },
             { key: 'announcements', icon: '📢', label: 'Announcements' },
-=======
-            { key: 'overview', icon: '', label: 'Overview' },
-            { key: 'complaints', icon: '', label: 'All Complaints' },
-            { key: 'alerts', icon: '', label: 'Smart Alerts' },
-            { key: 'actions', icon: '', label: 'Action Queue' },
->>>>>>> 25f37d9b2e519f8998ba23965ae79bd23ef51c09
           ].map(item => (
             <div key={item.key} className="sidebar-item" onClick={() => setActiveView(item.key)}
               style={{

@@ -93,13 +93,9 @@ const heroImages = [
 
 export default function HomePage() {
   const [activeComplaint, setActiveComplaint] = useState(0);
-<<<<<<< HEAD
   const [announcements, setAnnouncements] = useState<HomeAnnouncement[]>([]);
-
   const API_BASE = getBackendBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL);
-=======
   const [heroImgIdx, setHeroImgIdx] = useState(0);
->>>>>>> 25f37d9b2e519f8998ba23965ae79bd23ef51c09
 
   useEffect(() => {
     const interval = setInterval(() => {

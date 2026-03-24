@@ -74,6 +74,11 @@ def _ensure_complaint_workflow_columns():
         return
 
     required_columns = {
+        "ai_risk_score": "FLOAT",
+        "ai_risk_level": "VARCHAR",
+        "ai_risk_factors": "TEXT",
+        "ai_risk_reasoning": "TEXT",
+        "ai_leader_brief": "TEXT",
         "citizen_user_id": "INTEGER",
         "citizen_language": "VARCHAR",
         "image_path": "VARCHAR",
