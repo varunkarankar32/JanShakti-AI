@@ -3,6 +3,21 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { mockComplaints, PRIORITY_CONFIG } from '@/lib/mockData';
+import { getBackendBaseUrl } from '@/lib/apiBase';
+
+interface HomeAnnouncement {
+  id: number;
+  title: string;
+  message: string;
+  advisory_type: string;
+  priority: string;
+  ward?: string | null;
+  image_url?: string | null;
+  cta_text?: string | null;
+  cta_link?: string | null;
+  created_by_name?: string | null;
+  created_at?: string | null;
+}
 
 function AnimatedCounter({ end, suffix = '', prefix = '', duration = 2000 }: { end: number; suffix?: string; prefix?: string; duration?: number }) {
   const [count, setCount] = useState(0);
@@ -71,6 +86,9 @@ const rootCauses = [
 
 export default function HomePage() {
   const [activeComplaint, setActiveComplaint] = useState(0);
+  const [announcements, setAnnouncements] = useState<HomeAnnouncement[]>([]);
+
+  const API_BASE = getBackendBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -78,6 +96,17 @@ export default function HomePage() {
     }, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/announcements/public?limit=4`)
+      .then((res) => res.json())
+      .then((payload: { announcements?: HomeAnnouncement[] }) => {
+        setAnnouncements(payload?.announcements || []);
+      })
+      .catch(() => {
+        setAnnouncements([]);
+      });
+  }, [API_BASE]);
 
   return (
     <main className="main-content">
@@ -122,6 +151,57 @@ export default function HomePage() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* ============ LEADER ANNOUNCEMENTS ============ */}
+      <section className="section" style={{ background: '#EFF6FF', borderTop: '1px solid #DBEAFE', borderBottom: '1px solid #DBEAFE' }}>
+        <div className="container">
+          <div className="section-label">LEADER ANNOUNCEMENTS</div>
+          <h2 className="section-title">Advisories & Public Guidance</h2>
+          <p className="section-subtitle" style={{ marginBottom: 32 }}>
+            Official announcements from district leadership and response command center
+          </p>
+
+          {announcements.length === 0 ? (
+            <div className="glass-card" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+              No announcements published yet.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
+              {announcements.map((item) => {
+                const ctaLink = item.cta_link || '/citizen';
+                const isInternal = ctaLink.startsWith('/');
+                return (
+                  <article key={item.id} className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+                    <div style={{ height: 140, background: item.image_url ? `url(${item.image_url}) center/cover no-repeat` : 'linear-gradient(120deg, #1E3A8A, #0EA5E9)' }} />
+                    <div style={{ padding: 16 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                        <span className="chip" style={{ fontSize: '0.66rem' }}>{item.advisory_type.replace(/_/g, ' ').toUpperCase()}</span>
+                        <span className={`badge badge-${item.priority?.toLowerCase() === 'high' ? 'p1' : item.priority?.toLowerCase() === 'critical' ? 'p0' : 'p2'}`}>
+                          {item.priority?.toUpperCase() || 'MEDIUM'}
+                        </span>
+                      </div>
+                      <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 8 }}>{item.title}</h3>
+                      <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>{item.message}</p>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginBottom: 12 }}>
+                        {item.ward || 'All Wards'} • {item.created_by_name || 'Leader Office'}
+                      </div>
+                      {isInternal ? (
+                        <Link href={ctaLink} className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center', padding: '8px 12px' }}>
+                          {item.cta_text || 'View Details'}
+                        </Link>
+                      ) : (
+                        <a href={ctaLink} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center', padding: '8px 12px', textDecoration: 'none' }}>
+                          {item.cta_text || 'View Details'}
+                        </a>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
 

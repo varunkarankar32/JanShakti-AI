@@ -60,7 +60,7 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # Import and register routers
-from routers import complaints, nlp, priority, sentiment, vision, speech, reports, dashboard, whatsapp, auth
+from routers import complaints, nlp, priority, sentiment, vision, speech, reports, dashboard, whatsapp, auth, announcements
 
 app.include_router(complaints.router, prefix=API_PREFIX)
 app.include_router(auth.router, prefix=API_PREFIX)
@@ -72,6 +72,7 @@ app.include_router(speech.router, prefix=API_PREFIX)
 app.include_router(reports.router, prefix=API_PREFIX)
 app.include_router(dashboard.router, prefix=API_PREFIX)
 app.include_router(whatsapp.router, prefix=API_PREFIX)
+app.include_router(announcements.router, prefix=API_PREFIX)
 
 
 @app.on_event("startup")
@@ -108,6 +109,7 @@ def root():
             "speech_transcribe": f"{API_PREFIX}/speech/transcribe",
             "report_generate": f"{API_PREFIX}/reports/generate",
             "dashboard_stats": f"{API_PREFIX}/dashboard/stats",
+            "announcements_public": f"{API_PREFIX}/announcements/public",
             "whatsapp_webhook": f"{API_PREFIX}/whatsapp/webhook",
             "whatsapp_test": f"{API_PREFIX}/whatsapp/test",
         },

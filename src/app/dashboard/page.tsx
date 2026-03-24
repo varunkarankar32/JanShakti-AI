@@ -122,6 +122,21 @@ interface VerificationRequestItem {
   created_at?: string | null;
 }
 
+interface LeaderAnnouncement {
+  id: number;
+  title: string;
+  message: string;
+  advisory_type: string;
+  priority: string;
+  ward?: string | null;
+  image_url?: string | null;
+  cta_text?: string | null;
+  cta_link?: string | null;
+  is_published: boolean;
+  created_by_name?: string | null;
+  created_at?: string | null;
+}
+
 const DEFAULT_KPIS = [
   { label: 'Issues Tracked', value: '0', icon: '📋', color: '#3b82f6', change: 'Live from DB' },
   { label: 'Resolution Rate', value: '0%', icon: '✅', color: '#22c55e', change: 'Resolved / Total' },
@@ -165,6 +180,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [incidents, setIncidents] = useState<IncidentCluster[]>([]);
   const [verificationRequests, setVerificationRequests] = useState<VerificationRequestItem[]>([]);
+  const [leaderAnnouncements, setLeaderAnnouncements] = useState<LeaderAnnouncement[]>([]);
   const [backendOnline, setBackendOnline] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [secondsSinceUpdate, setSecondsSinceUpdate] = useState(0);
@@ -189,6 +205,14 @@ export default function DashboardPage() {
   const [geoLon, setGeoLon] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [announcementTitle, setAnnouncementTitle] = useState('');
+  const [announcementMessage, setAnnouncementMessage] = useState('');
+  const [announcementType, setAnnouncementType] = useState('public_notice');
+  const [announcementPriority, setAnnouncementPriority] = useState('medium');
+  const [announcementWard, setAnnouncementWard] = useState('All Wards');
+  const [announcementImageUrl, setAnnouncementImageUrl] = useState('');
+  const [announcementCtaText, setAnnouncementCtaText] = useState('');
+  const [announcementCtaLink, setAnnouncementCtaLink] = useState('');
   const assignPanelRef = useRef<HTMLDivElement | null>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -272,11 +296,12 @@ export default function DashboardPage() {
 
     try {
       const headers = { Authorization: `Bearer ${leaderToken}` };
-      const [complaintsRes, statsRes, incidentsRes, verificationRes] = await Promise.all([
+      const [complaintsRes, statsRes, incidentsRes, verificationRes, announcementsRes] = await Promise.all([
         fetch(`${API_BASE}/api/complaints?limit=50`, { headers }),
         fetch(`${API_BASE}/api/dashboard/stats`, { headers }),
         fetch(`${API_BASE}/api/complaints/incidents/summary?limit=8`, { headers }),
         fetch(`${API_BASE}/api/complaints/leader/verification-requests?limit=40`, { headers }),
+        fetch(`${API_BASE}/api/announcements/leader/manage?limit=20`, { headers }),
       ]);
 
       if (statsRes.status === 401 || statsRes.status === 403) {
@@ -313,12 +338,79 @@ export default function DashboardPage() {
       } else {
         setVerificationRequests([]);
       }
+
+      if (announcementsRes.ok) {
+        const data = await announcementsRes.json();
+        setLeaderAnnouncements(data.announcements || []);
+      } else {
+        setLeaderAnnouncements([]);
+        if (announcementsRes.status === 404) {
+          setActionMessage('✕ Announcements API not loaded on backend. Restart backend server and try again.');
+        }
+      }
     } catch {
       setBackendOnline(false);
       setIncidents([]);
       setVerificationRequests([]);
+      setLeaderAnnouncements([]);
     }
   }, [leaderToken, handleLeaderLogout, API_BASE]);
+
+  const handlePublishAnnouncement = async () => {
+    if (!leaderToken) return;
+    if (!announcementTitle.trim() || !announcementMessage.trim()) {
+      setActionMessage('✕ Announcement title and message are required.');
+      return;
+    }
+
+    setActionLoading(true);
+    setActionMessage('');
+    try {
+      const res = await fetch(`${API_BASE}/api/announcements`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${leaderToken}`,
+        },
+        body: JSON.stringify({
+          title: announcementTitle,
+          message: announcementMessage,
+          advisory_type: announcementType,
+          priority: announcementPriority,
+          ward: announcementWard || null,
+          image_url: announcementImageUrl || null,
+          cta_text: announcementCtaText || null,
+          cta_link: announcementCtaLink || null,
+          publish_now: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const detail = await parseDetail(res);
+        if (res.status === 404) {
+          setActionMessage('✕ Announcements API not loaded on backend. Restart backend server and try again.');
+        } else {
+          setActionMessage(`✕ ${detail}`);
+        }
+        return;
+      }
+
+      setAnnouncementTitle('');
+      setAnnouncementMessage('');
+      setAnnouncementType('public_notice');
+      setAnnouncementPriority('medium');
+      setAnnouncementWard('All Wards');
+      setAnnouncementImageUrl('');
+      setAnnouncementCtaText('');
+      setAnnouncementCtaLink('');
+      setActionMessage('✓ Announcement published and visible on homepage.');
+      await fetchData();
+    } catch {
+      setActionMessage('✕ Failed to publish announcement.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!leaderToken || !leaderUser) return;
@@ -577,6 +669,7 @@ export default function DashboardPage() {
             { key: 'complaints', icon: '📋', label: 'All Complaints' },
             { key: 'alerts', icon: '🚨', label: 'Smart Alerts' },
             { key: 'actions', icon: '📝', label: 'Action Queue' },
+            { key: 'announcements', icon: '📢', label: 'Announcements' },
           ].map(item => (
             <div key={item.key} className="sidebar-item" onClick={() => setActiveView(item.key)}
               style={{
@@ -1386,6 +1479,112 @@ export default function DashboardPage() {
                   <button className="btn btn-primary" style={{ padding: '8px 20px' }}>Take Action</button>
                 </div>
               ))}
+            </div>
+          )}
+
+          {activeView === 'announcements' && (
+            <div className="glass-card" style={{ padding: 24 }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>📢 Leader Announcement Center</h3>
+
+              <div style={{
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 10,
+                padding: 14,
+                background: 'var(--bg-secondary)',
+                marginBottom: 18,
+              }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                  <input
+                    className="form-input"
+                    value={announcementTitle}
+                    onChange={(e) => setAnnouncementTitle(e.target.value)}
+                    placeholder="Announcement title"
+                  />
+                  <input
+                    className="form-input"
+                    value={announcementWard}
+                    onChange={(e) => setAnnouncementWard(e.target.value)}
+                    placeholder="Ward scope (e.g., All Wards)"
+                  />
+                </div>
+
+                <textarea
+                  className="form-textarea"
+                  value={announcementMessage}
+                  onChange={(e) => setAnnouncementMessage(e.target.value)}
+                  placeholder="Write advisory / announcement details for citizens"
+                  style={{ marginBottom: 10 }}
+                />
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 10 }}>
+                  <select className="form-select" value={announcementType} onChange={(e) => setAnnouncementType(e.target.value)}>
+                    <option value="public_notice">Public Notice</option>
+                    <option value="advice">Citizen Advice</option>
+                    <option value="public_health">Public Health</option>
+                    <option value="infrastructure">Infrastructure Update</option>
+                    <option value="fact_check">Fact Check</option>
+                  </select>
+
+                  <select className="form-select" value={announcementPriority} onChange={(e) => setAnnouncementPriority(e.target.value)}>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                  <input
+                    className="form-input"
+                    value={announcementImageUrl}
+                    onChange={(e) => setAnnouncementImageUrl(e.target.value)}
+                    placeholder="Image URL (optional)"
+                  />
+                  <input
+                    className="form-input"
+                    value={announcementCtaText}
+                    onChange={(e) => setAnnouncementCtaText(e.target.value)}
+                    placeholder="Button text (optional)"
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center' }}>
+                  <input
+                    className="form-input"
+                    value={announcementCtaLink}
+                    onChange={(e) => setAnnouncementCtaLink(e.target.value)}
+                    placeholder="CTA link (optional) e.g., /citizen or https://..."
+                  />
+                  <button className="btn btn-primary" disabled={actionLoading} onClick={handlePublishAnnouncement}>
+                    Publish Announcement
+                  </button>
+                </div>
+              </div>
+
+              <h4 style={{ fontSize: '0.9rem', marginBottom: 10 }}>Recent Published Announcements</h4>
+              {actionMessage && (
+                <div style={{ marginBottom: 12, fontSize: '0.8rem', color: actionMessage.startsWith('✕') ? '#b91c1c' : '#166534' }}>
+                  {actionMessage}
+                </div>
+              )}
+              {leaderAnnouncements.length === 0 ? (
+                <div style={{ color: 'var(--text-tertiary)', fontSize: '0.82rem' }}>No announcements yet.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {leaderAnnouncements.map((item) => (
+                    <div key={item.id} style={{ border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 12, background: 'var(--bg-tertiary)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                        <strong>{item.title}</strong>
+                        <span className={`badge badge-${item.priority === 'critical' ? 'p0' : item.priority === 'high' ? 'p1' : 'p2'}`}>{item.priority.toUpperCase()}</span>
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 6 }}>{item.message}</div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)' }}>
+                        {item.advisory_type.replace(/_/g, ' ')} • {item.ward || 'All Wards'} • {item.created_by_name || 'Leader'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

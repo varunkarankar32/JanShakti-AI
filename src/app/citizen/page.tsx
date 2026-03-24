@@ -4,6 +4,19 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { CATEGORIES, WARDS, STATUS_CONFIG } from '@/lib/mockData';
 import { getBackendBaseUrl } from '@/lib/apiBase';
 
+const STATE_DISTRICT_MAP: Record<string, string[]> = {
+  'Andhra Pradesh': ['Anantapur', 'Chittoor', 'East Godavari', 'Guntur', 'Krishna', 'Visakhapatnam'],
+  'Bihar': ['Patna', 'Gaya', 'Muzaffarpur', 'Darbhanga', 'Bhagalpur', 'Purnia'],
+  'Delhi': ['Central Delhi', 'East Delhi', 'New Delhi', 'North Delhi', 'South Delhi', 'West Delhi'],
+  'Gujarat': ['Ahmedabad', 'Surat', 'Vadodara', 'Rajkot', 'Bhavnagar', 'Jamnagar'],
+  'Karnataka': ['Bengaluru Urban', 'Mysuru', 'Belagavi', 'Mangaluru', 'Hubballi', 'Ballari'],
+  'Madhya Pradesh': ['Bhopal', 'Indore', 'Jabalpur', 'Gwalior', 'Ujjain', 'Sagar'],
+  'Maharashtra': ['Mumbai', 'Pune', 'Nagpur', 'Nashik', 'Thane', 'Aurangabad'],
+  'Rajasthan': ['Jaipur', 'Jodhpur', 'Kota', 'Udaipur', 'Ajmer', 'Bikaner'],
+  'Tamil Nadu': ['Chennai', 'Coimbatore', 'Madurai', 'Salem', 'Tiruchirappalli', 'Tirunelveli'],
+  'Uttar Pradesh': ['Lucknow', 'Kanpur Nagar', 'Varanasi', 'Prayagraj', 'Agra', 'Gorakhpur'],
+};
+
 interface SubmittedComplaint {
   id: string;
   ticket_id: string;
@@ -160,6 +173,8 @@ export default function CitizenPortal() {
 
   const [tab, setTab] = useState<'file' | 'track'>('file');
   const [contactPhone, setContactPhone] = useState('');
+  const [stateName, setStateName] = useState('');
+  const [district, setDistrict] = useState('');
   const [category, setCategory] = useState('');
   const [ward, setWard] = useState('');
   const [description, setDescription] = useState('');
@@ -214,6 +229,30 @@ export default function CitizenPortal() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+
+  const availableStates = useMemo(() => Object.keys(STATE_DISTRICT_MAP), []);
+  const availableDistricts = useMemo(() => {
+    if (!stateName) return [];
+    return STATE_DISTRICT_MAP[stateName] || [];
+  }, [stateName]);
+
+  const locationWard = useMemo(() => {
+    if (ward.trim()) return ward.trim();
+    if (district) return `${district} District`;
+    return '';
+  }, [ward, district]);
+
+  const ensureLocationSelected = () => {
+    if (!stateName) {
+      alert('Please select a state before continuing.');
+      return false;
+    }
+    if (!district) {
+      alert('Please select a district before continuing.');
+      return false;
+    }
+    return true;
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -401,6 +440,9 @@ export default function CitizenPortal() {
       setPhotoExtractMessage('Please upload a photo first.');
       return;
     }
+    if (!ensureLocationSelected()) {
+      return;
+    }
 
     setPhotoExtractLoading(true);
     setPhotoExtractMessage('');
@@ -411,7 +453,7 @@ export default function CitizenPortal() {
     try {
       const imageData = new FormData();
       imageData.append('image', photoFile);
-      imageData.append('ward', ward || 'Ward 1');
+      imageData.append('ward', locationWard);
 
       // Use Gemini 2.5 Flash for image analysis
       const res = await fetch(`${API_BASE}/api/complaints/ai/analyze-image`, {
@@ -480,6 +522,9 @@ export default function CitizenPortal() {
       setVoiceFileMessage('Please choose an audio file first.');
       return;
     }
+    if (!ensureLocationSelected()) {
+      return;
+    }
 
     setVoiceFileProcessing(true);
     setVoiceFileMessage('');
@@ -489,7 +534,7 @@ export default function CitizenPortal() {
     try {
       const form = new FormData();
       form.append('audio', voiceFile);
-      form.append('ward', ward || 'Ward 1');
+      form.append('ward', locationWard);
 
       const res = await fetch(`${API_BASE}/api/complaints/extract/voice`, {
         method: 'POST',
@@ -614,6 +659,10 @@ export default function CitizenPortal() {
     setInputProcessing(true);
 
     try {
+      if (!ensureLocationSelected()) {
+        return;
+      }
+
       let finalDescription = description.trim();
       let finalCategory = category;
       let finalImagePath = photoMediaPath;
@@ -625,7 +674,7 @@ export default function CitizenPortal() {
         if (voiceFile && (!transcriptText || !finalAudioPath)) {
           const form = new FormData();
           form.append('audio', voiceFile);
-          form.append('ward', ward || 'Ward 1');
+          form.append('ward', locationWard);
 
           const voiceRes = await fetch(`${API_BASE}/api/complaints/extract/voice`, {
             method: 'POST',
@@ -668,7 +717,7 @@ export default function CitizenPortal() {
         if (!finalCategory || !finalDescription) {
           const imageData = new FormData();
           imageData.append('image', photoFile);
-          imageData.append('ward', ward || 'Ward 1');
+          imageData.append('ward', locationWard);
 
           const detectRes = await fetch(`${API_BASE}/api/complaints/extract/image`, {
             method: 'POST',
@@ -719,7 +768,8 @@ export default function CitizenPortal() {
           title: finalDescription.slice(0, 80),
           description: finalDescription,
           category: finalCategory,
-          ward,
+          ward: locationWard,
+          location: `${district}, ${stateName}`,
           citizen_name: currentUser.name,
           citizen_phone: contactPhone || currentUser.phone || null,
           image_path: inputMode === 'photo' ? (finalImagePath || null) : null,
@@ -743,7 +793,7 @@ export default function CitizenPortal() {
             body: JSON.stringify({
               description: finalDescription,
               category: finalCategory,
-              ward: ward || 'Ward 1',
+              ward: locationWard,
               title: finalDescription.slice(0, 80),
             }),
           });
@@ -756,6 +806,8 @@ export default function CitizenPortal() {
 
         setDescription('');
         setCategory('');
+        setStateName('');
+        setDistrict('');
         setWard('');
         setVoiceTranscript('');
         setVoiceLanguage('');
@@ -1006,6 +1058,37 @@ export default function CitizenPortal() {
 
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                         <div className="form-group">
+                          <label className="form-label">State</label>
+                          <select
+                            className="form-select"
+                            value={stateName}
+                            onChange={e => {
+                              setStateName(e.target.value);
+                              setDistrict('');
+                            }}
+                            required
+                          >
+                            <option value="">Select state</option>
+                            {availableStates.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">District</label>
+                          <select
+                            className="form-select"
+                            value={district}
+                            onChange={e => setDistrict(e.target.value)}
+                            required
+                            disabled={!stateName}
+                          >
+                            <option value="">{stateName ? 'Select district' : 'Select state first'}</option>
+                            {availableDistricts.map(d => <option key={d} value={d}>{d}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div className="form-group">
                           <label className="form-label">Category</label>
                           <select className="form-select" value={category} onChange={e => setCategory(e.target.value)}>
                             <option value="">Select category</option>
@@ -1013,9 +1096,9 @@ export default function CitizenPortal() {
                           </select>
                         </div>
                         <div className="form-group">
-                          <label className="form-label">Ward</label>
-                          <select className="form-select" value={ward} onChange={e => setWard(e.target.value)} required>
-                            <option value="">Select ward</option>
+                          <label className="form-label">Ward (Optional)</label>
+                          <select className="form-select" value={ward} onChange={e => setWard(e.target.value)}>
+                            <option value="">Use district as location</option>
                             {WARDS.map(w => <option key={w} value={w}>{w}</option>)}
                           </select>
                         </div>
